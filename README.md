@@ -2,6 +2,8 @@
 
 Monitor. Predict. Prevent. HydroNexus transforms water infrastructure management with real-time data and smart insights.
 
+**Live demo:** [hydro-nexus-ten.vercel.app](https://hydro-nexus-ten.vercel.app/)
+
 ---
 
 ## 1. Overview
