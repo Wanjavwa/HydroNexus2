@@ -18,7 +18,7 @@ export function MetricCard({
   icon: Icon,
   value,
   unit,
-  delta = 0,
+  delta = null,
   statusText,
   statusTone = 'normal', // normal | warning | danger
 }) {
@@ -29,7 +29,7 @@ export function MetricCard({
         ? 'border-amber-200 bg-amber-50'
         : 'border-slate-200 bg-white/90'
 
-  const meta = trendMeta(delta)
+  const meta = Number.isFinite(delta) ? trendMeta(delta) : null
 
   return (
     <div className={`rounded-2xl border p-5 shadow-[0_10px_35px_rgba(15,23,42,0.06)] transition ${tone}`}>
@@ -42,7 +42,7 @@ export function MetricCard({
             </p>
             {unit ? <p className="text-sm font-semibold text-slate-500">{unit}</p> : null}
           </div>
-          <p className={`mt-2 text-sm font-semibold ${meta.color}`}>{meta.arrow} {Math.abs(delta).toFixed(2)}</p>
+          {meta ? <p className={`mt-2 text-sm font-semibold ${meta.color}`}>{meta.arrow} {Math.abs(delta).toFixed(2)}</p> : null}
           {statusText ? <p className="mt-2 text-sm text-slate-700">{statusText}</p> : null}
         </div>
         {Icon ? (
@@ -54,4 +54,3 @@ export function MetricCard({
     </div>
   )
 }
-

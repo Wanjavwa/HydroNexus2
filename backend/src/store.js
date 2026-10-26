@@ -1,30 +1,58 @@
 const MAX_HISTORY = 60
 
 let latestReading = null
+let serialConnected = false
+let serialError = null
+let dataSource = 'arduino'
 const history = []
 
+function numericField(reading, aliases) {
+  for (const key of aliases) {
+    if (!Object.prototype.hasOwnProperty.call(reading, key) || reading[key] === null) continue
+    if (typeof reading[key] === 'string' && !reading[key].trim()) continue
+    const value = Number(reading[key])
+    if (Number.isFinite(value)) return value
+  }
+  return null
+}
+
 function normalizeReading(reading) {
-  if (!reading || typeof reading !== 'object') return null
+  if (!reading || typeof reading !== 'object' || Array.isArray(reading)) return null
 
-  // Accept multiple key aliases to make backend resilient to Arduino format changes.
-  // Primary schema (current):
-  //   { flow, total, pH, timestamp }
-  // Legacy aliases we may still see during migration:
-  //   { flow1, total1, pH } or { flowA, totalA, pH } or { flow1, total1, ph }.
-  const flow = Number(reading.flow ?? reading.flow1 ?? reading.flowA)
-  const total = Number(reading.total ?? reading.total1 ?? reading.totalA)
-  const pH = Number(reading.pH ?? reading.ph)
+  const normalized = {
+    flow: numericField(reading, ['flow', 'flow1', 'flowA']),
+    total: numericField(reading, ['total', 'total1', 'totalA']),
+    pH: numericField(reading, ['pH', 'ph']),
+    pressure: numericField(reading, ['pressure', 'pressurePsi', 'pressureKpa', 'pressure_psi', 'pressure_kpa']),
+  }
 
-  const isNum = (v) => Number.isFinite(v)
+  if (normalized.flow === null && normalized.pH === null && normalized.pressure === null) return null
 
-  const ok = isNum(flow) && isNum(total) && isNum(pH)
+  const providedTimestamp = reading.timestamp
+  const parsedTimestamp = typeof providedTimestamp === 'number'
+    ? providedTimestamp
+    : typeof providedTimestamp === 'string'
+      ? Date.parse(providedTimestamp)
+      : NaN
+  const now = Date.now()
+  normalized.timestamp = Number.isFinite(parsedTimestamp) && parsedTimestamp > 0 && parsedTimestamp <= now + 60000
+    ? parsedTimestamp
+    : now
 
-  if (!ok) return null
+  if (typeof reading.assetId === 'string' && reading.assetId.trim()) normalized.assetId = reading.assetId.trim()
+  if (typeof reading.sensorId === 'string' && reading.sensorId.trim()) normalized.sensorId = reading.sensorId.trim()
+  if (reading.sensorIds && typeof reading.sensorIds === 'object' && !Array.isArray(reading.sensorIds)) {
+    normalized.sensorIds = Object.fromEntries(
+      Object.entries(reading.sensorIds).filter(([, value]) => typeof value === 'string' && value.trim()),
+    )
+  }
 
-  const ts =
-    typeof reading.timestamp === 'number' && Number.isFinite(reading.timestamp) ? reading.timestamp : Date.now()
+  const pressureUnit = reading.pressureUnit
+    ?? (reading.pressurePsi !== undefined || reading.pressure_psi !== undefined ? 'psi' : undefined)
+    ?? (reading.pressureKpa !== undefined || reading.pressure_kpa !== undefined ? 'kPa' : undefined)
+  if (typeof pressureUnit === 'string' && pressureUnit.trim()) normalized.pressureUnit = pressureUnit.trim()
 
-  return { flow, total, pH, timestamp: ts }
+  return normalized
 }
 
 function pushReading(reading) {
@@ -43,7 +71,36 @@ function getLatest() {
 }
 
 function getHistory() {
-  return history.map((r) => ({ flow: r.flow, pH: r.pH, timestamp: r.timestamp }))
+  return history.map((reading) => ({ ...reading }))
+}
+
+function setSerialStatus({ connected, error = null }) {
+  serialConnected = Boolean(connected)
+  serialError = error ? String(error) : null
+}
+
+function setDataSource(source) {
+  if (source !== 'arduino' && source !== 'demo') throw new Error(`Unsupported data source: ${source}`)
+  dataSource = source
+  if (source === 'demo') {
+    serialConnected = true
+    serialError = null
+  }
+}
+
+function getStatus(staleAfterMs = 10000) {
+  const lastReadingAt = latestReading?.timestamp ?? null
+  const ageMs = lastReadingAt === null ? null : Math.max(0, Date.now() - lastReadingAt)
+  return {
+    source: dataSource,
+    demoMode: dataSource === 'demo',
+    connected: dataSource === 'demo' || serialConnected,
+    stale: ageMs === null || ageMs > staleAfterMs,
+    lastReadingAt,
+    ageMs,
+    staleAfterMs,
+    error: serialError,
+  }
 }
 
 function computeActiveAlerts() {
@@ -53,24 +110,32 @@ function computeActiveAlerts() {
   const ts = latestReading.timestamp
   const pH = latestReading.pH
 
-  // Extreme pH-based alerts
-  if (pH < 6) alerts.push({ message: 'Extreme Low pH', severity: 'critical', timestamp: ts })
-  if (pH > 8) alerts.push({ message: 'Extreme High pH', severity: 'critical', timestamp: ts })
+  if (pH !== null && pH < 6) alerts.push({ message: 'Extreme Low pH', severity: 'critical', timestamp: ts })
+  if (pH !== null && pH > 8) alerts.push({ message: 'Extreme High pH', severity: 'critical', timestamp: ts })
 
-  // Baseline tracking: sudden drop vs previous reading
-  const prev = history.length > 1 ? history[history.length - 2] : null
-  if (prev && Number.isFinite(prev.flow) && prev.flow > 0) {
-    const prevFlow = prev.flow
+  const previousWith = (field) => {
+    for (let index = history.length - 2; index >= 0; index--) {
+      if (Number.isFinite(history[index][field])) return history[index]
+    }
+    return null
+  }
+  const previousFlow = previousWith('flow')
+  const previousPressure = previousWith('pressure')
+  if (previousFlow && previousFlow.flow > 0 && latestReading.flow !== null) {
     const flow = latestReading.flow
-    const dropRatio = flow / prevFlow // < 1 means drop
-    const absDeltaRatio = Math.abs(flow - prevFlow) / prevFlow
+    const changeRatio = Math.abs(flow - previousFlow.flow) / previousFlow.flow
 
-    // Sudden drop (>= 50% drop)
-    if (flow < prevFlow * 0.5) {
+    if (flow < previousFlow.flow * 0.5) {
       alerts.push({ message: 'Sudden Flow Drop (Possible Leak)', severity: 'critical', timestamp: ts })
-    } else if (absDeltaRatio > 0.2) {
-      // Unusual fluctuation
+    } else if (changeRatio > 0.2) {
       alerts.push({ message: 'Unusual Flow Fluctuation', severity: 'warning', timestamp: ts })
+    }
+  }
+
+  if (previousPressure && previousPressure.pressure !== 0 && latestReading.pressure !== null) {
+    const changeRatio = Math.abs(latestReading.pressure - previousPressure.pressure) / Math.abs(previousPressure.pressure)
+    if (changeRatio > 0.25) {
+      alerts.push({ message: 'Unusual Pressure Fluctuation', severity: 'warning', timestamp: ts })
     }
   }
 
@@ -80,15 +145,15 @@ function computeActiveAlerts() {
 function computeRecommendations() {
   if (!latestReading) return []
 
-  const recs = []
-
+  const recommendations = []
   const pH = latestReading.pH
   const alerts = computeActiveAlerts()
-  const hasCriticalFlow = alerts.some((a) => a.message.includes('Sudden Flow Drop'))
-  const hasCriticalPH = alerts.some((a) => a.message.includes('Extreme'))
+  const hasCriticalFlow = alerts.some((alert) => alert.message.includes('Sudden Flow Drop'))
+  const hasFlowWarning = alerts.some((alert) => alert.message.includes('Flow Fluctuation'))
+  const hasPressureWarning = alerts.some((alert) => alert.message.includes('Pressure Fluctuation'))
 
-  if (pH < 6 || pH > 8 || hasCriticalPH) {
-    recs.push({
+  if (pH !== null && (pH < 6 || pH > 8)) {
+    recommendations.push({
       issue: 'pH out of safe range',
       reason: `pH=${pH.toFixed(2)} detected outside 6–8. This can accelerate corrosion/scaling.`,
       priority: 'high',
@@ -97,38 +162,40 @@ function computeRecommendations() {
   }
 
   if (hasCriticalFlow) {
-    recs.push({
+    recommendations.push({
       issue: 'Sudden flow drop detected',
-      reason: `Flow=${latestReading.flow.toFixed(2)} mL/s dropped sharply compared to the previous baseline reading.`,
+      reason: `Flow=${latestReading.flow.toFixed(2)} mL/s dropped sharply compared to the previous valid reading.`,
       priority: 'high',
-      actions: ['Close Valve', 'Inspect flow meter output', 'Perform leak investigation on affected section'],
+      actions: ['Inspect flow meter output', 'Perform a leak investigation'],
     })
-  } else if (alerts.some((a) => a.severity === 'warning')) {
-    recs.push({
+  } else if (hasFlowWarning) {
+    recommendations.push({
       issue: 'Flow instability warning',
-      reason: 'Unusual flow fluctuation suggests developing blockage or transient pump/valve behavior.',
+      reason: 'A change in valid flow measurements was detected; verify the meter and inspect the affected line.',
       priority: 'medium',
-      actions: ['Inspect pumps/filters', 'Check for developing blockage', 'Monitor trend for escalation'],
+      actions: ['Inspect pumps and filters', 'Check for developing blockage', 'Monitor subsequent readings'],
     })
   }
 
-  if (recs.length === 0) {
-    recs.push({
-      issue: 'System operating normally',
-      reason: 'pH is within safe band and flow is stable vs baseline.',
-      priority: 'low',
-      actions: ['Continue monitoring', 'Run routine inspections on schedule'],
+  if (hasPressureWarning) {
+    recommendations.push({
+      issue: 'Pressure fluctuation detected',
+      reason: 'Consecutive pressure readings changed by more than 25%; verify the pressure sensor and system conditions.',
+      priority: 'medium',
+      actions: ['Verify pressure sensor output', 'Inspect the associated line and controls'],
     })
   }
 
-  return recs
+  return recommendations
 }
 
 module.exports = {
   pushReading,
   getLatest,
   getHistory,
+  getStatus,
+  setSerialStatus,
+  setDataSource,
   computeActiveAlerts,
   computeRecommendations,
 }
-

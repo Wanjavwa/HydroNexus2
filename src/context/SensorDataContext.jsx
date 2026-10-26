@@ -31,6 +31,7 @@ export function SensorDataProvider({ children }) {
   const [history, setHistory] = useState([])
   const [alerts, setAlerts] = useState([])
   const [recommendations, setRecommendations] = useState([])
+  const [status, setStatus] = useState(null)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -61,11 +62,12 @@ export function SensorDataProvider({ children }) {
           return r.json()
         }
 
-        const [sensors, hist, al, rec] = await Promise.all([
+        const [sensors, hist, al, rec, streamStatus] = await Promise.all([
           fetchJson('/api/sensors'),
           fetchJson('/api/history'),
           fetchJson('/api/alerts'),
           fetchJson('/api/recommendations'),
+          fetchJson('/api/status'),
         ])
 
         if (cancelled) return
@@ -74,9 +76,10 @@ export function SensorDataProvider({ children }) {
         setHistory(Array.isArray(hist) ? hist : [])
         setAlerts(Array.isArray(al) ? al : [])
         setRecommendations(Array.isArray(rec) ? rec : [])
+        setStatus(streamStatus)
 
         const ts = sensors?.timestamp
-        setLastUpdatedAt(typeof ts === 'number' ? ts : null)
+        setLastUpdatedAt(typeof ts === 'number' ? ts : streamStatus?.lastReadingAt ?? null)
 
         setError(null)
         setConnectionLost(false)
@@ -109,14 +112,14 @@ export function SensorDataProvider({ children }) {
       history,
       alerts,
       recommendations,
+      status,
       loading,
       error,
       connectionLost,
       lastUpdatedAt,
     }),
-    [latest, history, alerts, recommendations, loading, error, connectionLost, lastUpdatedAt],
+    [latest, history, alerts, recommendations, status, loading, error, connectionLost, lastUpdatedAt],
   )
 
   return <SensorDataContext.Provider value={value}>{children}</SensorDataContext.Provider>
 }
-

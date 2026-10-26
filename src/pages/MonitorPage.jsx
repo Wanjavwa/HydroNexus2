@@ -1,5 +1,4 @@
-import { Droplets, Gauge, Activity, AlertTriangle, Ruler, Volume2 } from 'lucide-react'
-import { useMemo } from 'react'
+import { Activity, AlertTriangle, Droplets, Gauge } from 'lucide-react'
 import { AlertsPanel } from '../components/AlertsPanel.jsx'
 import { LiveLineChart } from '../components/LiveLineChart.jsx'
 import { MetricCard } from '../components/MetricCard.jsx'
@@ -8,180 +7,75 @@ import { useSensorData } from '../hooks/useSensorData.js'
 
 const page = 'mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8'
 
-function formatTime(ts) {
-  if (!ts) return ''
-  const d = new Date(ts)
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+function formatTime(timestamp) {
+  if (!timestamp) return 'Not available'
+  return new Date(timestamp).toLocaleString()
 }
 
 function flowStatusToneFromAlerts(alerts) {
-  const hasSuddenDrop = alerts?.some((a) => (a.message || '').toLowerCase().includes('sudden flow drop'))
-  const hasWarning = alerts?.some((a) => (a.severity || '').toLowerCase() === 'warning' || (a.message || '').toLowerCase().includes('unusual'))
-
+  const hasSuddenDrop = alerts?.some((alert) => (alert.message || '').toLowerCase().includes('sudden flow drop'))
+  const hasWarning = alerts?.some((alert) => (alert.severity || '').toLowerCase() === 'warning')
   if (hasSuddenDrop) return { tone: 'danger', label: 'Sudden flow drop detected' }
   if (hasWarning) return { tone: 'warning', label: 'Flow fluctuation warning' }
-  return { tone: 'normal', label: 'Flow stable' }
+  return { tone: 'normal', label: 'No flow anomaly detected' }
 }
 
 function pHTone(pH) {
   if (pH < 6 || pH > 8) return { tone: 'danger', label: 'Out of safe band' }
   if (pH < 6.3 || pH > 7.7) return { tone: 'warning', label: 'Approaching threshold' }
-  return { tone: 'normal', label: 'Normal range' }
+  return { tone: 'normal', label: 'Within monitored range' }
 }
 
-function ultrasonicTone(mm) {
-  if (mm < 4.2) return { tone: 'warning', label: 'Wear detected' }
-  return { tone: 'normal', label: 'Healthy' }
-}
-
-function acousticTone(v) {
-  if (v > 78) return { tone: 'warning', label: 'Spike detected' }
-  return { tone: 'normal', label: 'Normal' }
-}
-
-// Deterministic pseudo-random in [0,1) from a timestamp + salt.
-function rand01(ts, salt) {
-  const x = (Number(ts) ^ Number(salt)) >>> 0
-  // Mix bits (simple but stable).
-  const y = Math.imul(x, 1664525) + 1013904223
-  return ((y >>> 0) % 4294967295) / 4294967295
-}
-
-function clamp(n, min, max) {
-  return Math.max(min, Math.min(max, n))
-}
-
-function SkeletonCard() {
+function SensorCard({ title, icon, value, unit, statusText, statusTone = 'normal' }) {
   return (
-    <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_10px_35px_rgba(15,23,42,0.07)]">
-      <div className="h-5 w-40 animate-pulse rounded bg-slate-200/70" />
-      <div className="mt-4 h-10 w-24 animate-pulse rounded bg-slate-200/70" />
-      <div className="mt-4 h-4 w-32 animate-pulse rounded bg-slate-200/70" />
+    <MetricCard
+      title={title}
+      icon={icon}
+      value={value}
+      unit={unit}
+      statusText={statusText}
+      statusTone={statusTone}
+    />
+  )
+}
+
+function FreshnessNotice({ status, connectionLost, error }) {
+  let message = null
+  if (connectionLost) message = `Backend connection lost${error ? `: ${error}` : ''}. Retrying automatically.`
+  else if (!status?.connected) message = 'Arduino is offline. Displayed measurements are the last readings received, not live data.'
+  else if (status.stale) message = 'Arduino is connected, but its last valid measurement is stale. Values shown are not live.'
+
+  if (!message) return null
+  return (
+    <div role="status" className="mt-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+      <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+      {message}
     </div>
   )
 }
 
 export default function MonitorPage() {
-  const { latest, history, alerts, loading, connectionLost, lastUpdatedAt } = useSensorData()
-
-  const effectiveHistory = useMemo(() => {
-    // If the backend has no history yet (e.g., serial not streaming), seed a mock series so charts/cards are not blank.
-    if (history.length > 0) return history
-
-    // Use a stable base timestamp to avoid "impure" Date.now() during render.
-    const baseTs = latest?.timestamp ?? lastUpdatedAt ?? 1700000000000
-    const seedFlow = Number.isFinite(latest?.flow) ? latest.flow : 41.67
-    const seedTotal = Number.isFinite(latest?.total) ? latest.total : 0
-    const seedPH = Number.isFinite(latest?.pH) ? latest.pH : 7.12
-
-    return Array.from({ length: 60 }).map((_, i) => {
-      const ts = baseTs - (60 - 1 - i) * 1000
-
-      const wobble = Math.sin(i / 7) * 0.8
-      const n1 = (rand01(ts, 301) - 0.5) * 2.2
-      const spike = rand01(ts, 777) < 0.05 ? (rand01(ts, 778) - 0.5) * 16 : 0
-
-      const flow = clamp(seedFlow + wobble + n1 + spike, 10, 65)
-
-      const phDrift = Math.sin(i / 12) * 0.08
-      const phNoise = (rand01(ts, 401) - 0.5) * 0.06
-      const phSpike = rand01(ts, 888) < 0.03 ? (rand01(ts, 889) < 0.5 ? -2.0 : 2.0) : 0
-      const pH = clamp(seedPH + phDrift + phNoise + phSpike, 4.3, 11.2)
-
-      const total = seedTotal + flow * i
-      return { flow, pH, total, timestamp: ts }
-    })
-  }, [history, latest, lastUpdatedAt])
-
-  const displayLatest = latest ?? effectiveHistory[effectiveHistory.length - 1] ?? null
-
-  const chartData = useMemo(() => {
-    return effectiveHistory.map((r) => ({
-      time: formatTime(r.timestamp),
-      flow: r.flow,
-      pH: r.pH,
-    }))
-  }, [effectiveHistory])
-
-  const mockUltrasonicHistory = useMemo(() => {
-    if (effectiveHistory.length > 0) {
-      // Derived from timestamps (no effect-driven state).
-      return effectiveHistory.map((r, i) => {
-        const ts = r.timestamp
-        const drift = i * -0.002 // slow thinning over time index
-        const phWear = Math.max(0, 6.2 - r.pH) * 0.008 // acidic => faster thinning
-        const noise = (rand01(ts, 11) - 0.5) * 0.04
-        const wobble = Math.sin(i / 8) * 0.012
-        const ultrasonic = clamp(4.88 + drift - phWear + noise + wobble, 3.7, 5.2)
-        return { timestamp: ts, ultrasonic }
-      })
-    }
-
-    // Seed curve when backend history hasn't arrived yet.
-    const nowTs = displayLatest?.timestamp
-    if (!nowTs) return []
-
-    const ph = Number(displayLatest?.pH ?? 7)
-    const phWear = Math.max(0, 6.2 - ph) * 0.008
-
-    return Array.from({ length: 60 }).map((_, i) => {
-      const ts = nowTs - (60 - 1 - i) * 1000
-      const drift = i * -0.002
-      const noise = (rand01(ts, 11) - 0.5) * 0.04
-      const wobble = Math.sin(i / 8) * 0.012
-      const ultrasonic = clamp(4.88 + drift - phWear + noise + wobble, 3.7, 5.2)
-      return { timestamp: ts, ultrasonic }
-    })
-  }, [effectiveHistory, displayLatest?.timestamp, displayLatest?.pH])
-
-  const mockAcousticHistory = useMemo(() => {
-    if (effectiveHistory.length > 0) {
-      return effectiveHistory.map((r, i) => {
-        const ts = r.timestamp
-        const baseline = 26 + Math.sin(i / 5) * 3
-        const noise = (rand01(ts, 21) - 0.5) * 10
-        const spikeChance = rand01(ts, 99)
-        const spike = spikeChance < 0.06 ? 35 + rand01(ts, 123) * 20 : 0
-        const pHStress = Math.max(0, Math.abs(r.pH - 7) - 0.5) * 2.5
-        const acoustic = clamp(baseline + noise + spike + pHStress, 0, 100)
-        return { timestamp: ts, acoustic }
-      })
-    }
-
-    const nowTs = displayLatest?.timestamp
-    if (!nowTs) return []
-
-    const ph = Number(displayLatest?.pH ?? 7)
-    const pHStress = Math.max(0, Math.abs(ph - 7) - 0.5) * 2.5
-
-    return Array.from({ length: 60 }).map((_, i) => {
-      const ts = nowTs - (60 - 1 - i) * 1000
-      const baseline = 26 + Math.sin(i / 5) * 3
-      const noise = (rand01(ts, 21) - 0.5) * 10
-      const spikeChance = rand01(ts, 99)
-      const spike = spikeChance < 0.06 ? 35 + rand01(ts, 123) * 20 : 0
-      const acoustic = clamp(baseline + noise + spike + pHStress, 0, 100)
-      return { timestamp: ts, acoustic }
-    })
-  }, [effectiveHistory, displayLatest?.timestamp, displayLatest?.pH])
-
-  const flowTone = displayLatest ? flowStatusToneFromAlerts(alerts) : { tone: 'normal', label: '' }
-  const ph = displayLatest?.pH ?? 0
-  const pHT = displayLatest ? pHTone(ph) : { tone: 'normal', label: '' }
-
-  const lastUpdatedLabel = lastUpdatedAt ? formatTime(lastUpdatedAt) : null
-
-  const ultrasonicLatest = mockUltrasonicHistory[mockUltrasonicHistory.length - 1]?.ultrasonic
-  const ultrasonicPrev = mockUltrasonicHistory[mockUltrasonicHistory.length - 2]?.ultrasonic
-  const acousticLatest = mockAcousticHistory[mockAcousticHistory.length - 1]?.acoustic
-  const acousticPrev = mockAcousticHistory[mockAcousticHistory.length - 2]?.acoustic
-
-  const ultrasonicDelta =
-    Number.isFinite(ultrasonicLatest) && Number.isFinite(ultrasonicPrev) ? ultrasonicLatest - ultrasonicPrev : 0
-  const acousticDelta = Number.isFinite(acousticLatest) && Number.isFinite(acousticPrev) ? acousticLatest - acousticPrev : 0
-
-  const uTone = Number.isFinite(ultrasonicLatest) ? ultrasonicTone(ultrasonicLatest) : { tone: 'normal', label: '' }
-  const aTone = Number.isFinite(acousticLatest) ? acousticTone(acousticLatest) : { tone: 'normal', label: '' }
+  const { latest, history, alerts, loading, connectionLost, error, lastUpdatedAt, status } = useSensorData()
+  const isStale = !status?.connected || status?.stale || connectionLost
+  const flowTone = flowStatusToneFromAlerts(alerts)
+  const phTone = Number.isFinite(latest?.pH) ? pHTone(latest.pH) : { tone: 'normal', label: 'Measurement missing' }
+  const chartData = history.map((reading) => ({
+    time: new Date(reading.timestamp).toLocaleTimeString(),
+    flow: Number.isFinite(reading.flow) ? reading.flow : null,
+    pH: Number.isFinite(reading.pH) ? reading.pH : null,
+    pressure: Number.isFinite(reading.pressure) ? reading.pressure : null,
+  }))
+  const sourceLabel = status?.source === 'demo'
+    ? 'DEMO SIMULATION'
+    : status?.source === 'arduino'
+      ? 'Arduino serial'
+      : 'Backend status unavailable'
+  const connectionLabel = status?.source === 'demo'
+    ? 'Demo active'
+    : status?.connected
+      ? 'Connected'
+      : 'Offline'
+  const pressureUnit = latest?.pressureUnit ? ` ${latest.pressureUnit}` : ''
 
   return (
     <section className={`${page} py-12`}>
@@ -189,139 +83,95 @@ export default function MonitorPage() {
         <div>
           <h1 className="text-4xl font-bold text-slate-900">Monitor</h1>
           <p className="mt-2 max-w-3xl text-slate-600">
-            Live telemetry from your Arduino (REST polling every 1 second).
+            Measurements received from the connected Arduino and polled from the backend every second.
           </p>
         </div>
-        <div className="text-sm font-semibold text-slate-600">
-          {connectionLost ? (
-            <span className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
-              <AlertTriangle size={14} />
-              Connection Lost
-            </span>
-          ) : lastUpdatedLabel ? (
-            <span>
-              Last update: <span className="text-slate-900">{lastUpdatedLabel}</span>
-            </span>
+        <div className="flex flex-col gap-1 text-sm font-semibold text-slate-600 sm:items-end">
+          <span>Data source: <span className="text-slate-900">{sourceLabel}</span></span>
+          <span>Connection: <span className={status?.connected ? 'text-emerald-700' : 'text-rose-700'}>{connectionLabel}</span></span>
+          <span>Last measurement: <span className="text-slate-900">{formatTime(lastUpdatedAt)}</span></span>
+        </div>
+      </div>
+
+      <FreshnessNotice status={status} connectionLost={connectionLost} error={error} />
+
+      {loading && !latest ? (
+        <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 text-slate-600">Waiting for backend readings…</div>
+      ) : !latest ? (
+        <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 text-slate-700">
+          No valid Arduino readings have been received. Check the serial connection and message format.
+        </div>
+      ) : (
+        <>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <SensorCard
+              title="Flow Rate"
+              icon={Droplets}
+              value={Number.isFinite(latest.flow) ? latest.flow.toFixed(2) : 'Missing'}
+              unit={Number.isFinite(latest.flow) ? 'mL/s' : ''}
+              statusText={Number.isFinite(latest.flow) ? flowTone.label : 'Flow measurement missing'}
+              statusTone={isStale ? 'warning' : flowTone.tone}
+            />
+            <SensorCard
+              title="Total Flow"
+              icon={Droplets}
+              value={Number.isFinite(latest.total) ? latest.total.toFixed(1) : 'Missing'}
+              unit={Number.isFinite(latest.total) ? 'mL' : ''}
+              statusText={Number.isFinite(latest.total) ? 'Arduino-reported total' : 'Total measurement missing'}
+              statusTone={isStale ? 'warning' : 'normal'}
+            />
+            <SensorCard
+              title="pH"
+              icon={Gauge}
+              value={Number.isFinite(latest.pH) ? latest.pH.toFixed(2) : 'Missing'}
+              statusText={phTone.label}
+              statusTone={isStale ? 'warning' : phTone.tone}
+            />
+            <SensorCard
+              title="Pressure"
+              icon={Activity}
+              value={Number.isFinite(latest.pressure) ? latest.pressure.toFixed(2) : 'Missing'}
+              unit={Number.isFinite(latest.pressure) ? pressureUnit : ''}
+              statusText={Number.isFinite(latest.pressure) ? 'Arduino-reported measurement' : 'Pressure sensor reading unavailable'}
+              statusTone={isStale ? 'warning' : 'normal'}
+            />
+          </div>
+
+          {isStale ? (
+            <p className="mt-3 text-sm font-semibold text-amber-700">
+              Values above are the last valid measurements received at {formatTime(latest.timestamp)}.
+            </p>
           ) : null}
-        </div>
-      </div>
 
-      <div className="mt-8 grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <div className="grid gap-4 md:grid-cols-3">
-            {loading || !displayLatest ? (
-              <>
-                <SkeletonCard />
-                <SkeletonCard />
-                <SkeletonCard />
-              </>
-            ) : (
-              <MetricCard
-                title="Flow Rate"
-                icon={Droplets}
-                value={displayLatest.flow.toFixed(2)}
-                unit="mL/s"
-                delta={0}
-                statusText={flowTone.label}
-                statusTone={flowTone.tone}
-              />
-            )}
-            {loading || !displayLatest ? null : (
-              <MetricCard
-                title="Total Flow"
-                icon={Droplets}
-                value={displayLatest.total.toFixed(1)}
-                unit="mL"
-                delta={0}
-                statusText={flowTone.tone === 'danger' ? 'Sudden drop warning' : ''}
-                statusTone={flowTone.tone === 'danger' ? 'danger' : 'normal'}
-              />
-            )}
-            {loading || !displayLatest ? null : (
-              <MetricCard
-                title="pH"
-                icon={Gauge}
-                value={displayLatest.pH.toFixed(2)}
-                unit=""
-                delta={0}
-                statusText={pHT.label}
-                statusTone={pHT.tone}
-              />
-            )}
-
-            {loading || !displayLatest || ultrasonicLatest === undefined ? (
-              <SkeletonCard />
-            ) : (
-              <MetricCard
-                title="Ultrasonic Thickness"
-                icon={Ruler}
-                value={Number(ultrasonicLatest).toFixed(2)}
-                unit="mm"
-                delta={ultrasonicDelta}
-                statusText={uTone.label}
-                statusTone={uTone.tone}
-              />
-            )}
-
-            {loading || !displayLatest || acousticLatest === undefined ? (
-              <SkeletonCard />
-            ) : (
-              <MetricCard
-                title="Acoustic / Vibration"
-                icon={Volume2}
-                value={Number(acousticLatest).toFixed(0)}
-                unit="/100"
-                delta={acousticDelta}
-                statusText={aTone.label}
-                statusTone={aTone.tone}
-              />
-            )}
-          </div>
-        </div>
-
-        <div className="lg:col-span-1">
-          <AlertsPanel alerts={alerts} />
-          <div className="mt-4 rounded-2xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_10px_35px_rgba(15,23,42,0.07)]">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-slate-900">Stream Status</p>
-              <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                <Activity size={14} />
-                Live Polling
-              </span>
+          <div className="mt-6 grid gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <div className="grid gap-4 md:grid-cols-2">
+                <LiveLineChart title="Flow history" subtitle="Actual Arduino readings only" data={chartData} dataKey="flow" stroke="#0ea5e9" />
+                <LiveLineChart title="pH history" subtitle="Actual Arduino readings only" data={chartData} dataKey="pH" stroke="#14b8a6" />
+                <LiveLineChart title="Pressure history" subtitle="Only present when reported by the Arduino" data={chartData} dataKey="pressure" stroke="#6366f1" />
+              </div>
             </div>
-            <div className="mt-4 space-y-2 text-sm text-slate-700">
-              <p>
-                <span className="font-semibold">Health checks:</span> pH thresholds + sudden flow drop detection
-              </p>
-              <p>
-                <span className="font-semibold">Updates:</span> once per second
-              </p>
+            <div className="space-y-4">
+              <AlertsPanel alerts={alerts} status={status} hasReadings={Boolean(latest)} />
+              <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_10px_35px_rgba(15,23,42,0.07)]">
+                <p className="text-sm font-semibold text-slate-900">Stream Status</p>
+                <div className="mt-3 space-y-2 text-sm text-slate-700">
+                  <p><span className="font-semibold">Source:</span> {sourceLabel}</p>
+                  <p><span className="font-semibold">{status?.source === 'demo' ? 'Demo source:' : 'Serial connection:'}</span> {status?.source === 'demo' ? 'Active (simulated readings)' : status?.connected ? 'Connected' : 'Offline'}</p>
+                  <p><span className="font-semibold">Freshness:</span> {status?.stale ? 'Stale' : 'Current'}</p>
+                  <p><span className="font-semibold">Asset ID:</span> {latest.assetId || 'Not reported'}</p>
+                  <p><span className="font-semibold">Sensor IDs:</span> {latest.sensorId || (latest.sensorIds ? Object.values(latest.sensorIds).join(', ') : 'Not reported')}</p>
+                  <p><span className="font-semibold">Polling:</span> every second</p>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <div className="lg:col-span-1">
-          {loading ? (
-            <SkeletonCard />
-          ) : (
-            <LiveLineChart title="Flow over time" subtitle="Polling every second" data={chartData} dataKey="flow" stroke="#0ea5e9" />
-          )}
-        </div>
-        <div className="lg:col-span-1">
-          {loading ? (
-            <SkeletonCard />
-          ) : (
-            <LiveLineChart title="pH over time" subtitle="Threshold-based alerting" data={chartData} dataKey="pH" stroke="#14b8a6" />
-          )}
-        </div>
-      </div>
-
-      <div className="mt-8">
-        <PipelineMap latest={latest} />
-      </div>
+          <div className="mt-8">
+            <PipelineMap latest={latest} status={status} />
+          </div>
+        </>
+      )}
     </section>
   )
 }
-

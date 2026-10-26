@@ -50,7 +50,7 @@ function HomePage() {
           </p>
           <h1 className="text-7xl font-black tracking-tight text-slate-900 sm:text-8xl">HYDRONEXUS</h1>
           <p className="mx-auto mt-6 max-w-3xl text-xl leading-relaxed text-slate-600 sm:text-2xl">
-            All-in-one water management system to monitor pipelines, predict failures,
+            All-in-one water management system to monitor pipelines, detect anomalies,
             and protect campus infrastructure in real time.
           </p>
           <div className="mt-10 flex justify-center gap-4">
@@ -77,7 +77,7 @@ function HomePage() {
               HydroNexus is an intelligent water management system that 
               combines smart devices such as sensors, pumps, and switches with an 
               interactive web platform—all working together to monitor real-time conditions,
-               analyze system behavior, predict potential failures, and enable proactive action 
+               analyze system behavior, detect unusual readings, and enable proactive action
                to improve the reliability of Grambling’s water infrastructure across campus.
               </p>
             </div>
@@ -106,34 +106,34 @@ function HomePage() {
           </p>
         </div>
         <div className="grid gap-5 md:grid-cols-3">
-          <div className={cls.card}><Activity className="mb-3 text-sky-500" /><h3 className="text-2xl font-semibold text-slate-900">Flow & Pressure</h3><p className="mt-2 text-slate-600">Detect leaks, blockages, and abnormal behavior through flow differentials.</p></div>
+          <div className={cls.card}><Activity className="mb-3 text-sky-500" /><h3 className="text-2xl font-semibold text-slate-900">Flow & Pressure</h3><p className="mt-2 text-slate-600">Detect unusual flow or pressure changes when those sensors report valid readings.</p></div>
           <div className={cls.card}><TestTube2 className="mb-3 text-cyan-500" /><h3 className="text-2xl font-semibold text-slate-900">Water Quality</h3><p className="mt-2 text-slate-600">Measure pH, detect hard water, contamination, and corrosion factors.</p></div>
-          <div className={cls.card}><Shield className="mb-3 text-indigo-500" /><h3 className="text-2xl font-semibold text-slate-900">Structural Integrity</h3><p className="mt-2 text-slate-600">Ultrasonic and acoustic sensing for cracks, wear, and damage risk.</p></div>
+          <div className={cls.card}><Shield className="mb-3 text-indigo-500" /><h3 className="text-2xl font-semibold text-slate-900">Additional Sensors</h3><p className="mt-2 text-slate-600">Optional sensor values appear only when the connected hardware reports them.</p></div>
         </div>
       </section>
 
       <section id="predict" className={`${cls.page} scroll-mt-24 py-16`}>
         <div className="mb-8">
-          <h2 className="text-4xl font-bold text-slate-900">02 Analyze & Predict</h2>
+          <h2 className="text-4xl font-bold text-slate-900">02 Analyze</h2>
           <p className="mt-3 max-w-3xl text-lg text-slate-600">
-            Process collected data to evaluate degradation, model decline, and forecast exactly when and how failures will occur.
+            Review actual sensor history and detect abnormal flow and water-quality readings. The available data does not support future-failure prediction.
           </p>
         </div>
         <div className="grid gap-5 md:grid-cols-3">
           <div className={cls.card}>
             <Activity className="mb-3 text-cyan-500" />
-            <h3 className="text-2xl font-semibold text-slate-900">External Factors</h3>
-            <p className="mt-2 text-slate-600">Assess pH, mineral content, pressure stress, and environmental impacts.</p>
+            <h3 className="text-2xl font-semibold text-slate-900">Available Measurements</h3>
+            <p className="mt-2 text-slate-600">Review flow, pH, and pressure only when a valid reading is reported.</p>
           </div>
           <div className={cls.card}>
             <TrendingUp className="mb-3 text-cyan-500" />
-            <h3 className="text-2xl font-semibold text-slate-900">Degradation Modeling</h3>
-            <p className="mt-2 text-slate-600">Track performance decline and quantify deterioration rate over time.</p>
+            <h3 className="text-2xl font-semibold text-slate-900">Measured Trends</h3>
+            <p className="mt-2 text-slate-600">Compare actual sensor measurements across the available history.</p>
           </div>
           <div className={cls.card}>
             <BarChart3 className="mb-3 text-cyan-500" />
-            <h3 className="text-2xl font-semibold text-slate-900">Failure Prediction</h3>
-            <p className="mt-2 text-slate-600">Predict blockages, corrosion leaks, and pressure-induced bursts.</p>
+            <h3 className="text-2xl font-semibold text-slate-900">Anomaly Detection</h3>
+            <p className="mt-2 text-slate-600">Flag unusual changes in valid flow, pH, and pressure readings.</p>
           </div>
         </div>
       </section>
@@ -142,7 +142,7 @@ function HomePage() {
         <div className="mb-8">
           <h2 className="text-4xl font-bold text-slate-900">03 Prevent</h2>
           <p className="mt-3 max-w-3xl text-lg text-slate-600">
-            Convert predictions into actions: respond to critical events, execute recommended workflows, and manage maintenance to stop failures early.
+            Respond to detected anomalies, review backend recommendations, and manage maintenance tasks.
           </p>
         </div>
         <div className="grid gap-5 md:grid-cols-3">

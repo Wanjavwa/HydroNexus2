@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import {
   AlertTriangle,
   Bell,
-  Bot,
   CalendarDays,
   Clock,
   Factory,
@@ -15,8 +14,6 @@ import {
 } from 'lucide-react'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 import { useSensorData } from '../hooks/useSensorData.js'
-
-const pipeOptions = ['Pipe A', 'Pipe B', 'Pipe C', 'Main Supply']
 
 function nowLabel() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -77,25 +74,17 @@ export default function PreventPage() {
   const [confirm, setConfirm] = useState({ open: false, action: null, alert: null })
   const [recentActions, setRecentActions] = useState([])
 
-  const { alerts, recommendations, loading, connectionLost } = useSensorData()
+  const { latest, alerts, recommendations, loading, connectionLost, status } = useSensorData()
 
   const [taskForm, setTaskForm] = useState(() => ({
     title: 'Maintenance Task',
     date: formatISODate(Date.now() + 24 * 60 * 60 * 1000),
-    pipe: 'Pipe B',
+    pipe: 'Unassigned',
     priority: 'Medium',
   }))
 
-  const [scheduledTasks, setScheduledTasks] = useState(() => {
-    const today = formatISODate(Date.now())
-    const tomorrow = formatISODate(Date.now() + 24 * 60 * 60 * 1000)
-    const in3 = formatISODate(Date.now() + 3 * 24 * 60 * 60 * 1000)
-    return [
-      { id: 't1', title: 'Flush Pipe B (scaling mitigation)', assignedDate: tomorrow, pipe: 'Pipe B', priority: 'High', status: 'Pending' },
-      { id: 't2', title: 'Inspect valve alignment (Main Supply)', assignedDate: in3, pipe: 'Main Supply', priority: 'Medium', status: 'In Progress' },
-      { id: 't3', title: 'Ultrasonic thickness survey (Pipe A)', assignedDate: today, pipe: 'Pipe A', priority: 'Low', status: 'Completed' },
-    ]
-  })
+  const [scheduledTasks, setScheduledTasks] = useState([])
+  const pipeOptions = [...new Set(['Unassigned', latest?.assetId, ...scheduledTasks.map((task) => task.pipe)].filter(Boolean))]
 
   const [filters, setFilters] = useState({
     priority: 'All',
@@ -110,14 +99,6 @@ export default function PreventPage() {
       .filter((t) => (filters.date ? t.assignedDate === filters.date : true))
       .sort((a, b) => a.assignedDate.localeCompare(b.assignedDate))
   }, [scheduledTasks, filters])
-
-  const smartSummary = useMemo(() => {
-    const hasCritical = alerts?.some((a) => String(a.severity || '').toLowerCase() === 'critical')
-    if (hasCritical) {
-      return 'Based on current conditions, the system recommends addressing the Zone B leak immediately within 5 days to prevent blockage and potential failure.'
-    }
-    return 'Based on current conditions, the system recommends prioritizing mineral buildup and pressure stability checks to prevent degradation acceleration.'
-  }, [alerts])
 
   const openConfirm = (alert, action) => {
     setConfirm({ open: true, alert, action })
@@ -149,19 +130,19 @@ export default function PreventPage() {
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
             <Bell size={14} />
-            Live Control Mode
+            Operator Action Center
           </span>
           <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-            <Bot size={14} />
-            AI-driven actions
+            <Sparkles size={14} />
+            Backend recommendations
           </span>
         </div>
       </div>
 
       {/* 1) IMMEDIATE RESPONSE */}
-      {connectionLost ? (
+      {connectionLost || !status?.connected || status?.stale ? (
         <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-700">
-          Connection Lost. Retrying automatically...
+          {connectionLost ? 'Backend connection lost. Retrying automatically.' : !status?.connected ? 'Arduino is offline; displayed data is not live.' : 'Arduino readings are stale; recommendations are based only on the last received measurements.'}
         </div>
       ) : null}
       <div className="mt-8">
@@ -179,6 +160,11 @@ export default function PreventPage() {
           {loading ? (
             <div className="lg:col-span-3 rounded-2xl border border-slate-200 bg-white/90 p-6 text-center shadow-[0_10px_35px_rgba(15,23,42,0.05)]">
               Loading live alerts...
+            </div>
+          ) : alerts.length === 0 && (!latest || !status?.connected || status?.stale) ? (
+            <div className="lg:col-span-3 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
+              <p className="text-lg font-bold text-amber-900">Alert status unavailable</p>
+              <p className="mt-1 text-sm text-amber-800">No current valid live reading is available to evaluate.</p>
             </div>
           ) : alerts.length === 0 ? (
             <div className="lg:col-span-3 rounded-2xl border border-slate-200 bg-white/90 p-6 text-center shadow-[0_10px_35px_rgba(15,23,42,0.05)]">
@@ -241,8 +227,8 @@ export default function PreventPage() {
               <Sparkles size={18} />
             </span>
             <div>
-              <h2 className="text-2xl font-bold text-slate-900">🧠 System Recommendations (From Predict)</h2>
-              <p className="mt-1 text-sm font-semibold text-slate-600">Top recommendations to prevent degradation from progressing.</p>
+              <h2 className="text-2xl font-bold text-slate-900">Backend Maintenance Recommendations</h2>
+              <p className="mt-1 text-sm font-semibold text-slate-600">Actions derived from valid readings and detected anomalies.</p>
             </div>
           </div>
         </div>
@@ -251,6 +237,12 @@ export default function PreventPage() {
           {loading ? (
             <div className="lg:col-span-3 rounded-2xl border border-slate-200 bg-white/90 p-6 text-center shadow-[0_10px_35px_rgba(15,23,42,0.05)]">
               Loading recommendations...
+            </div>
+          ) : recommendations.length === 0 ? (
+            <div className="lg:col-span-3 rounded-2xl border border-slate-200 bg-white/90 p-6 text-center text-sm text-slate-600">
+              {latest && status?.connected && !status?.stale
+                ? 'No anomaly-based maintenance recommendations are available from the current readings.'
+                : 'Recommendations are unavailable until current valid Arduino readings arrive.'}
             </div>
           ) : (
             recommendations.slice(0, 4).map((r) => {
@@ -344,7 +336,7 @@ export default function PreventPage() {
                 />
               </label>
               <label className="grid gap-1">
-                <span className="text-xs font-semibold text-slate-600">Pipe / Zone</span>
+                <span className="text-xs font-semibold text-slate-600">Asset / Location</span>
                 <select
                   value={taskForm.pipe}
                   onChange={(e) => setTaskForm((f) => ({ ...f, pipe: e.target.value }))}
@@ -408,7 +400,7 @@ export default function PreventPage() {
                   </select>
                 </label>
                 <label className="grid gap-1">
-                  <span className="text-xs font-semibold text-slate-600">Pipe / Zone</span>
+                  <span className="text-xs font-semibold text-slate-600">Asset / Location</span>
                   <select
                     value={filters.pipe}
                     onChange={(e) => setFilters((f) => ({ ...f, pipe: e.target.value }))}
@@ -507,7 +499,7 @@ export default function PreventPage() {
         <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_10px_35px_rgba(15,23,42,0.06)]">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-slate-500">🤖 System Recommendation Summary</p>
+              <p className="text-sm font-semibold text-slate-500">Backend Recommendation Summary</p>
               <h3 className="mt-2 text-2xl font-bold text-slate-900">What to do next</h3>
             </div>
             <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
@@ -516,19 +508,25 @@ export default function PreventPage() {
             </span>
           </div>
 
-          <p className="mt-3 text-sm font-semibold text-slate-700 leading-relaxed">{smartSummary}</p>
+          <p className="mt-3 text-sm font-semibold text-slate-700 leading-relaxed">
+            {recommendations[0]?.reason || (
+              latest && status?.connected && !status?.stale
+                ? 'No anomaly-based recommendation is currently available from the latest Arduino measurements.'
+                : 'No live recommendation is available because valid current Arduino readings are missing or stale.'
+            )}
+          </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
               <Power size={14} />
-              Monitor system stability
+              Source: {status?.source === 'demo' ? 'DEMO SIMULATION' : status?.source === 'arduino' ? 'Arduino serial' : 'Unavailable'}
             </span>
             <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
               <Wrench size={14} />
-              Validate structural integrity
+              {status?.connected && !status?.stale ? 'Serial connected' : 'Serial offline or stale'}
             </span>
             <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
               <AlertTriangle size={14} />
-              Respond to alerts quickly
+              Last reading: {formatBackendTime(latest?.timestamp) || 'not available'}
             </span>
           </div>
         </div>
@@ -537,7 +535,7 @@ export default function PreventPage() {
       {/* 6) NAV LINK */}
       <div className="mt-10 flex items-center justify-center">
         <Link to="/predict" className="text-sm font-bold text-indigo-700 transition hover:underline">
-          View Predictions →
+          View Anomaly Analysis →
         </Link>
       </div>
 
@@ -578,4 +576,3 @@ export default function PreventPage() {
     </section>
   )
 }
-
