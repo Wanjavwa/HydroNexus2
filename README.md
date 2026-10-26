@@ -29,6 +29,14 @@ The goal is to give operators a clear, live picture of what is happening in thei
   - Detect sudden flow drops, unusual flow changes, out-of-range pH, and pressure changes when pressure data is available
   - Analyze only valid readings and the available in-memory history
   - Does not claim to forecast future failures
+- **Digital twin**
+  - Configure and persist the real network assets and connections; no physical topology is prefilled
+  - Associate readings using the asset ID provided by the Arduino
+- **Maintenance and AI assistant**
+  - Persist operator maintenance tasks locally in backend JSON files
+  - Optional backend-only OpenAI assistant retrieves readings and network information through read-only backend tools
+- **Ultrasonic thickness**
+  - Accept optional `thicknessMm` measurements and show them without inferring wall loss or future failure
 
 - **Alerts for abnormal conditions**
   - Detection of:
@@ -40,7 +48,7 @@ The goal is to give operators a clear, live picture of what is happening in thei
 - **Preventative recommendations & actions**
   - Recommendations derived from current sensor state and alerts
   - Suggested actions (e.g. adjust dosing, inspect valves, schedule maintenance)
-  - Prevent page focused on **immediate response**, **recommendations**, and **maintenance tasks**
+  - Maintenance page focused on **immediate response**, **recommendations**, and **maintenance tasks**
 
 ---
 
@@ -84,9 +92,10 @@ The goal is to give operators a clear, live picture of what is happening in thei
    - `GET /api/recommendations` – suggested actions based on alerts/conditions
 
 5. **React frontend visualizes the data**
-   - Monitor page: real-time metrics, trend charts, alerts, pipeline map.
-   - Analyze page: anomaly alerts and charts based on actual history (no future-failure prediction).
-   - Prevent page: backend-derived recommendations and maintenance planning. There is no separate AI chat service in this repository.
+   - Monitor & Predict: real-time readings, charts, alerts, and anomaly detection (not future-failure predictions).
+   - Digital Twin: operator-configured assets and connections, persisted by the backend.
+   - Maintenance: evidence-based recommendations and persisted maintenance tasks.
+   - The optional assistant runs in the backend and uses read-only tools to fetch actual measurements and configured network data.
 
 ### Arduino serial connection and message format
 
@@ -106,7 +115,7 @@ Legacy text labels `Flow Sensor 1 | Flow Rate: ...` and `pH Probe | Voltage: ...
 {"flow":12.34,"total":1234,"pH":7.1,"pressure":42.5,"pressureUnit":"kPa","timestamp":"2026-10-25T20:58:00Z","assetId":"main-supply","sensorIds":{"flow":"flow-1","pH":"ph-1","pressure":"pressure-1"}}
 ```
 
-JSON messages may contain any available `flow`, `pH`/`ph`, or `pressure` measurement; the other measurements may be omitted. `total`, `timestamp`, `assetId`, `sensorId`, `sensorIds`, and `pressureUnit` are optional. A supplied timestamp may be epoch milliseconds or an ISO date string; the backend uses its receipt time when the timestamp is missing or invalid. Non-numeric measurements are ignored, and messages with no valid flow, pH, or pressure measurement are discarded. Malformed and unsupported serial messages are logged and do not replace the latest valid reading.
+JSON messages may contain any available `flow`, `pH`/`ph`, `pressure`, or `thicknessMm` measurement; the other measurements may be omitted. `total`, `timestamp`, `assetId`, `sensorId`, `sensorIds`, and `pressureUnit` are optional. A supplied timestamp may be epoch milliseconds or an ISO date string; the backend uses its receipt time when the timestamp is missing or invalid. Non-numeric measurements are ignored, and messages with no valid flow, pH, pressure, or thickness measurement are discarded. Malformed and unsupported serial messages are logged and do not replace the latest valid reading. Associate a reading with a configured digital-twin asset by setting `assetId` to the asset's ID. Thickness values alone do not establish wall loss; baseline thickness, material, calibration, and inspection conditions are not modeled.
 
 Backend endpoints:
 
@@ -117,8 +126,13 @@ Backend endpoints:
 | `GET /api/history` | Up to 60 actual valid readings |
 | `GET /api/alerts` | Current anomalies derived from the latest valid measurements/history |
 | `GET /api/recommendations` | Recommendations derived from detected anomalies |
+| `GET /api/network` | Persisted, operator-configured assets and connections |
+| `GET /api/maintenance` | Persisted maintenance tasks |
+| `GET /api/assistant/status` | Whether backend OpenAI configuration is available |
 
 The history is held in memory and is cleared when the backend restarts; no database/persistent store is configured.
+
+The digital-twin configuration and maintenance tasks are stored separately in `backend/data/network.json` and `backend/data/maintenance.json`, created when first edited and excluded from version control. Assistant requests require a backend `OPENAI_API_KEY`; without it, all monitoring and maintenance features remain available and the assistant reports that setup is needed.
 
 ---
 
@@ -127,8 +141,8 @@ The history is held in memory and is cleared when the backend restarts; no datab
 ### A. Clone the repository
 
 ```bash
-git clone https://github.com/Wanjavwa/HydroNexus.git
-cd HydroNexus
+git clone https://github.com/Wanjavwa/HydroNexus2.git
+cd HydroNexus2
 ```
 
 Make sure you are on the `main` branch:
@@ -174,13 +188,16 @@ cd ..
 1. Identify the serial port assigned to the connected Arduino on this computer.
 2. Set the required port and, only if the sketch uses a different baud rate, the baud override (PowerShell example):
 
-```bash
+```powershell
 cd backend
+Copy-Item .env.example .env
 $env:SERIAL_PORT = "COM5"   # adjust to your actual port
 $env:SERIAL_BAUD = "9600"   # existing default; change only to match the sketch
 $env:READING_STALE_MS = "10000"  # default freshness threshold
 $env:DEMO_MODE = "false"  # never enable alongside real-data operation
 ```
+
+Optional AI assistant configuration belongs in `backend/.env` (copy `backend/.env.example` first). Set `OPENAI_API_KEY` there if the assistant should be enabled. Keep the key out of frontend environment variables and source control.
 
 3. Start the backend:
 
@@ -215,12 +232,12 @@ This starts the Vite dev server (typically on `http://localhost:5173`).
 
 3. **Data flow**
    - The frontend polls the backend’s REST API once per second.
-   - When the Arduino is sending valid data, the Monitor, Analyze, and Prevent pages update from backend polling.
+   - When the Arduino is sending valid data, Monitor & Predict, Digital Twin, and Maintenance use backend readings and connection status.
    - If hardware is unavailable, the app reports missing/offline data by default.
 
 ### Optional demo mode
 
-For a hardware-free demonstration only, set `DEMO_MODE` to `true` in the backend environment before starting it. Demo mode disables serial input, generates clearly labeled sample readings, and never mixes them with Arduino measurements. Leave it unset or set it to `false` for production/hardware operation. The dashboard and Analyze page show `DEMO SIMULATION` as the active source.
+For a hardware-free demonstration only, set `DEMO_MODE` to `true` in the backend environment before starting it. Demo mode disables serial input, generates clearly labeled sample readings, and never mixes them with Arduino measurements. Leave it unset or set it to `false` for production/hardware operation. The dashboard and other pages show `DEMO SIMULATION` as the active source.
 
 ---
 

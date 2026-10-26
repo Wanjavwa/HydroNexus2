@@ -24,9 +24,10 @@ function normalizeReading(reading) {
     total: numericField(reading, ['total', 'total1', 'totalA']),
     pH: numericField(reading, ['pH', 'ph']),
     pressure: numericField(reading, ['pressure', 'pressurePsi', 'pressureKpa', 'pressure_psi', 'pressure_kpa']),
+    thicknessMm: numericField(reading, ['thicknessMm', 'thickness_mm', 'thickness']),
   }
 
-  if (normalized.flow === null && normalized.pH === null && normalized.pressure === null) return null
+  if (normalized.flow === null && normalized.pH === null && normalized.pressure === null && normalized.thicknessMm === null) return null
 
   const providedTimestamp = reading.timestamp
   const parsedTimestamp = typeof providedTimestamp === 'number'
@@ -51,6 +52,7 @@ function normalizeReading(reading) {
     ?? (reading.pressurePsi !== undefined || reading.pressure_psi !== undefined ? 'psi' : undefined)
     ?? (reading.pressureKpa !== undefined || reading.pressure_kpa !== undefined ? 'kPa' : undefined)
   if (typeof pressureUnit === 'string' && pressureUnit.trim()) normalized.pressureUnit = pressureUnit.trim()
+  if (normalized.thicknessMm !== null) normalized.thicknessUnit = 'mm'
 
   return normalized
 }
@@ -140,6 +142,11 @@ function computeActiveAlerts() {
   }
 
   return alerts
+    .map((alert) => ({
+      ...alert,
+      assetId: latestReading.assetId ?? null,
+      sensorId: latestReading.sensorId ?? null,
+    }))
 }
 
 function computeRecommendations() {
@@ -186,13 +193,31 @@ function computeRecommendations() {
     })
   }
 
-  return recommendations
+  return recommendations.map((recommendation) => ({
+    ...recommendation,
+    assetId: latestReading.assetId ?? null,
+    timestamp: latestReading.timestamp,
+    evidence: {
+      flow: latestReading.flow,
+      pH: latestReading.pH,
+      pressure: latestReading.pressure,
+      thicknessMm: latestReading.thicknessMm,
+    },
+  }))
+}
+
+function getAssetReadings(assetId, limit = MAX_HISTORY) {
+  return history
+    .filter((reading) => reading.assetId === assetId)
+    .slice(-limit)
+    .map((reading) => ({ ...reading }))
 }
 
 module.exports = {
   pushReading,
   getLatest,
   getHistory,
+  getAssetReadings,
   getStatus,
   setSerialStatus,
   setDataSource,

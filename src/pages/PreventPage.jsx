@@ -1,578 +1,255 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  AlertTriangle,
-  Bell,
-  CalendarDays,
-  Clock,
-  Factory,
-  Power,
-  ShieldAlert,
-  SlidersHorizontal,
-  Sparkles,
-  Wrench,
-} from 'lucide-react'
-import ConfirmModal from '../components/ConfirmModal.jsx'
+import { AlertTriangle, CalendarDays, Clock, ExternalLink, Plus, Trash2, Wrench } from 'lucide-react'
 import { useSensorData } from '../hooks/useSensorData.js'
+import { apiRequest } from '../utils/api.js'
 
-function nowLabel() {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+function formatTime(timestamp) {
+  return timestamp ? new Date(timestamp).toLocaleString() : 'Not available'
 }
 
-function formatBackendTime(ts) {
-  if (!ts) return ''
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+function dateOnly(timestamp) {
+  const date = new Date(timestamp)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-function severityTone(sev) {
-  const s = String(sev || '').toLowerCase()
-  if (s === 'critical' || s === 'danger' || s === 'high') {
-    return {
-      badge: 'bg-rose-50 border-rose-200 text-rose-700',
-      dot: 'bg-rose-500',
-      card: 'border-rose-200/70 bg-rose-50/40',
-    }
-  }
-  return {
-    badge: 'bg-amber-50 border-amber-200 text-amber-700',
-    dot: 'bg-amber-500',
-    card: 'border-amber-200/70 bg-amber-50/40',
-  }
-}
-
-function priorityTone(priority) {
-  const p = String(priority || '').toLowerCase()
-  if (p === 'high') {
-    return { badge: 'bg-rose-50 border-rose-200 text-rose-700', dot: 'bg-rose-500' }
-  }
-  if (p === 'medium' || p === 'med') {
-    return { badge: 'bg-amber-50 border-amber-200 text-amber-700', dot: 'bg-amber-500' }
-  }
-  return { badge: 'bg-emerald-50 border-emerald-200 text-emerald-700', dot: 'bg-emerald-500' }
-}
-
-function StatusPill({ status }) {
-  const tone =
-    status === 'Completed'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-      : status === 'In Progress'
-        ? 'border-amber-200 bg-amber-50 text-amber-700'
-        : 'border-slate-200 bg-white text-slate-700'
-
-  return <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${tone}`}>{status}</span>
-}
-
-function formatISODate(d) {
-  const dt = new Date(d)
-  const yyyy = dt.getFullYear()
-  const mm = String(dt.getMonth() + 1).padStart(2, '0')
-  const dd = String(dt.getDate()).padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
+function evidenceText(value, unit = '') {
+  return Number.isFinite(value) ? `${value}${unit}` : 'Missing'
 }
 
 export default function PreventPage() {
-  const [confirm, setConfirm] = useState({ open: false, action: null, alert: null })
-  const [recentActions, setRecentActions] = useState([])
-
-  const { latest, alerts, recommendations, loading, connectionLost, status } = useSensorData()
-
-  const [taskForm, setTaskForm] = useState(() => ({
-    title: 'Maintenance Task',
-    date: formatISODate(Date.now() + 24 * 60 * 60 * 1000),
-    pipe: 'Unassigned',
+  const { latest, alerts, recommendations, status, connectionLost } = useSensorData()
+  const [tasks, setTasks] = useState([])
+  const [assets, setAssets] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const [actionLog, setActionLog] = useState([])
+  const [task, setTask] = useState({
+    title: '',
+    assignedDate: dateOnly(Date.now() + 86400000),
+    assetId: '',
     priority: 'Medium',
-  }))
-
-  const [scheduledTasks, setScheduledTasks] = useState([])
-  const pipeOptions = [...new Set(['Unassigned', latest?.assetId, ...scheduledTasks.map((task) => task.pipe)].filter(Boolean))]
-
-  const [filters, setFilters] = useState({
-    priority: 'All',
-    pipe: 'All',
-    date: '',
   })
 
-  const filteredTasks = useMemo(() => {
-    return scheduledTasks
-      .filter((t) => (filters.priority === 'All' ? true : t.priority === filters.priority))
-      .filter((t) => (filters.pipe === 'All' ? true : t.pipe === filters.pipe))
-      .filter((t) => (filters.date ? t.assignedDate === filters.date : true))
-      .sort((a, b) => a.assignedDate.localeCompare(b.assignedDate))
-  }, [scheduledTasks, filters])
+  const liveUnavailable = connectionLost || !status?.connected || status?.stale
+  const taskCount = useMemo(() => tasks.filter((item) => item.status !== 'Completed').length, [tasks])
 
-  const openConfirm = (alert, action) => {
-    setConfirm({ open: true, alert, action })
+  async function loadMaintenance() {
+    setError(null)
+    try {
+      const [taskList, network] = await Promise.all([
+        apiRequest('/api/maintenance'),
+        apiRequest('/api/network'),
+      ])
+      setTasks(Array.isArray(taskList) ? taskList : [])
+      setAssets(Array.isArray(network.assets) ? network.assets : [])
+    } catch (loadError) {
+      setError(loadError.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const closeConfirm = () => setConfirm((c) => ({ ...c, open: false }))
+  useEffect(() => {
+    loadMaintenance()
+  }, [])
 
-  const executeImmediateAction = () => {
-    if (!confirm.alert || !confirm.action) return
-    const actionName = confirm.action
-    const alertTitle = confirm.alert.message || confirm.alert.title || 'Alert'
-    setRecentActions((prev) => [
-      { id: `${Date.now()}-${alertTitle}`, alertTitle, action: actionName, time: nowLabel() },
-      ...prev,
-    ].slice(0, 6))
+  async function createTask(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError(null)
+    try {
+      const updated = await apiRequest('/api/maintenance', {
+        method: 'POST',
+        body: JSON.stringify({ ...task, assetId: task.assetId || null, status: 'Pending' }),
+      })
+      setTasks(updated)
+      setTask((current) => ({ ...current, title: '' }))
+    } catch (saveError) {
+      setError(saveError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
 
-    setConfirm({ open: false, action: null, alert: null })
+  async function updateTaskStatus(item, newStatus) {
+    setSaving(true)
+    setError(null)
+    try {
+      const updated = await apiRequest(`/api/maintenance/${encodeURIComponent(item.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newStatus }),
+      })
+      setTasks(updated)
+    } catch (saveError) {
+      setError(saveError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deleteTask(id) {
+    setSaving(true)
+    setError(null)
+    try {
+      const updated = await apiRequest(`/api/maintenance/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      setTasks(updated)
+    } catch (saveError) {
+      setError(saveError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function logOperatorAction(alert, action) {
+    if (!window.confirm(`Log "${action}" for "${alert.message}"? This records an operator action only; HydroNexus is not connected to valve or pump controls.`)) return
+    setActionLog((current) => [
+      { id: `${Date.now()}-${action}`, title: alert.message, action, timestamp: Date.now() },
+      ...current,
+    ].slice(0, 10))
   }
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <section className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-bold text-slate-900">Prevent</h1>
-          <p className="mt-2 max-w-3xl text-slate-600">
-            Real-time action center for smart water infrastructure: respond to critical events, execute recommended maintenance, and track progress.
-          </p>
+          <p className="text-sm font-semibold uppercase tracking-wide text-indigo-600">Maintenance</p>
+          <h1 className="mt-1 text-4xl font-bold text-slate-900">Inspections & Workflows</h1>
+          <p className="mt-2 max-w-3xl text-slate-600">Recommendations use backend-detected anomalies and actual available readings. Future failure prediction is not configured.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
-            <Bell size={14} />
-            Operator Action Center
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-            <Sparkles size={14} />
-            Backend recommendations
-          </span>
-        </div>
+        <span className={`rounded-full border px-3 py-1 text-sm font-semibold ${status?.source === 'demo' ? 'border-amber-200 bg-amber-50 text-amber-900' : liveUnavailable ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+          {status?.source === 'demo' ? 'DEMO SIMULATION' : liveUnavailable ? 'Data offline or stale' : 'Arduino live data'}
+        </span>
       </div>
 
-      {/* 1) IMMEDIATE RESPONSE */}
-      {connectionLost || !status?.connected || status?.stale ? (
-        <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-700">
-          {connectionLost ? 'Backend connection lost. Retrying automatically.' : !status?.connected ? 'Arduino is offline; displayed data is not live.' : 'Arduino readings are stale; recommendations are based only on the last received measurements.'}
+      {liveUnavailable ? (
+        <div role="status" className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+          {connectionLost ? 'Backend connection lost. Live recommendation status is unavailable.' : !status?.connected ? 'Arduino is disconnected; displayed readings are not live.' : 'Arduino readings are stale; verify the equipment before acting.'}
         </div>
       ) : null}
-      <div className="mt-8">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-50 border border-rose-200 text-rose-700">
-            <AlertTriangle size={18} />
-          </span>
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">🚨 Immediate Response (Critical Events)</h2>
-            <p className="mt-1 text-sm font-semibold text-slate-600">Active alerts require confirmation before execution.</p>
-          </div>
-        </div>
+      {error ? <div role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-800">{error}</div> : null}
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          {loading ? (
-            <div className="lg:col-span-3 rounded-2xl border border-slate-200 bg-white/90 p-6 text-center shadow-[0_10px_35px_rgba(15,23,42,0.05)]">
-              Loading live alerts...
-            </div>
-          ) : alerts.length === 0 && (!latest || !status?.connected || status?.stale) ? (
-            <div className="lg:col-span-3 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
-              <p className="text-lg font-bold text-amber-900">Alert status unavailable</p>
-              <p className="mt-1 text-sm text-amber-800">No current valid live reading is available to evaluate.</p>
-            </div>
-          ) : alerts.length === 0 ? (
-            <div className="lg:col-span-3 rounded-2xl border border-slate-200 bg-white/90 p-6 text-center shadow-[0_10px_35px_rgba(15,23,42,0.05)]">
-              <p className="text-lg font-bold text-slate-900">No critical events right now</p>
-              <p className="mt-1 text-sm text-slate-600">Monitoring remains active for new anomalies.</p>
-            </div>
-          ) : (
-            alerts.map((a) => {
-              const tone = severityTone(a.severity)
-              return (
-                <div key={`${a.message}-${a.timestamp}`} className={`rounded-2xl border ${tone.card} p-5 shadow-[0_10px_35px_rgba(239,68,68,0.10)]`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                        <span className={`h-2.5 w-2.5 rounded-full ${tone.dot} animate-pulse`} />
-                        {a.message}
-                      </p>
-                      <p className={`mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${tone.badge}`}>
-                        <ShieldAlert size={14} />
-                        Severity: {a.severity}
-                      </p>
-                      <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-slate-600">
-                        <Clock size={14} />
-                        Detected at {formatBackendTime(a.timestamp)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <p className="text-sm font-semibold text-slate-700">Actions</p>
-                    <div className="mt-3 grid gap-2">
-                      {[
-                        'Close Valve',
-                        'Shut System',
-                        'Notify Team',
-                      ].map((action) => (
-                        <button
-                          key={action}
-                          type="button"
-                          onClick={() => openConfirm(a, action)}
-                          className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm font-semibold text-slate-800 transition hover:-translate-y-[1px] hover:shadow-[0_18px_40px_rgba(239,68,68,0.12)]"
-                        >
-                          {action}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )
-            })
-          )}
-        </div>
-      </div>
-
-      {/* 2) RECOMMENDATIONS */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-700">
-              <Sparkles size={18} />
-            </span>
+      <div className="mt-7 grid gap-5 lg:grid-cols-2">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-2xl font-bold text-slate-900">Backend Maintenance Recommendations</h2>
-              <p className="mt-1 text-sm font-semibold text-slate-600">Actions derived from valid readings and detected anomalies.</p>
+              <h2 className="text-xl font-bold text-slate-900">Detected events</h2>
+              <p className="mt-1 text-sm text-slate-600">Evidence is linked to the latest valid backend readings.</p>
             </div>
+            <AlertTriangle className="text-amber-600" />
           </div>
-        </div>
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          {loading ? (
-            <div className="lg:col-span-3 rounded-2xl border border-slate-200 bg-white/90 p-6 text-center shadow-[0_10px_35px_rgba(15,23,42,0.05)]">
-              Loading recommendations...
-            </div>
-          ) : recommendations.length === 0 ? (
-            <div className="lg:col-span-3 rounded-2xl border border-slate-200 bg-white/90 p-6 text-center text-sm text-slate-600">
-              {latest && status?.connected && !status?.stale
-                ? 'No anomaly-based maintenance recommendations are available from the current readings.'
-                : 'Recommendations are unavailable until current valid Arduino readings arrive.'}
-            </div>
-          ) : (
-            recommendations.slice(0, 4).map((r) => {
-            const tone = priorityTone(r.priority)
-            return (
-              <div key={`${r.issue}-${r.priority}`} className="rounded-2xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_10px_35px_rgba(15,23,42,0.07)] transition hover:-translate-y-[2px] hover:shadow-[0_18px_45px_rgba(59,130,246,0.12)]">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-600">Issue</p>
-                    <p className="mt-1 text-lg font-bold text-slate-900">{r.issue}</p>
-                    <p className="mt-2 text-sm font-semibold text-slate-600">{r.reason}</p>
-                  </div>
-                  <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${tone.badge}`}>
-                    <span className={`h-2.5 w-2.5 rounded-full ${tone.dot}`} />
-                    {r.priority}
-                  </span>
-                </div>
-                <div className="mt-4">
-                  <p className="text-sm font-semibold text-slate-700">Action Buttons</p>
+          {alerts.length ? (
+            <ul className="mt-4 space-y-3">
+              {alerts.map((alert, index) => (
+                <li key={`${alert.message}-${alert.timestamp}-${index}`} className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                  <p className="font-bold text-slate-900">{alert.message}</p>
+                  <p className="mt-1 text-sm text-slate-700">{alert.severity} · {formatTime(alert.timestamp)}</p>
+                  {alert.assetId ? <Link to={`/digital-twin?asset=${encodeURIComponent(alert.assetId)}`} className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-indigo-700">Asset {alert.assetId} <ExternalLink size={14} /></Link> : <p className="mt-1 text-xs text-slate-500">Asset not reported by this sensor.</p>}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {(r.actions || []).length ? (
-                      r.actions.map((action) => (
-                        <button
-                          key={action}
-                          type="button"
-                          onClick={() => {
-                            setRecentActions((prev) => [
-                              { id: `${Date.now()}-${action}`, alertTitle: r.issue, action, time: nowLabel() },
-                              ...prev,
-                            ].slice(0, 6))
-                          }}
-                          className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm font-semibold text-slate-800 transition hover:-translate-y-[1px] hover:shadow-[0_18px_40px_rgba(59,130,246,0.10)]"
-                        >
-                          {action}
-                        </button>
-                      ))
-                    ) : (
-                      <span className="text-sm font-semibold text-slate-500">No actions available</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })
-          )}
-        </div>
-      </div>
-
-      {/* 3) MAINTENANCE MANAGEMENT */}
-      <div className="mt-8">
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700">
-            <Wrench size={18} />
-          </span>
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">🛠️ Maintenance Management</h2>
-            <p className="mt-1 text-sm font-semibold text-slate-600">Schedule, track, and complete tasks with filters.</p>
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-1 rounded-2xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_10px_35px_rgba(15,23,42,0.06)]">
-            <p className="text-sm font-semibold text-slate-700">Schedule maintenance</p>
-            <form
-              className="mt-4 grid gap-3"
-              onSubmit={(e) => {
-                e.preventDefault()
-                const id = `t-${Date.now()}`
-                setScheduledTasks((prev) => [
-                  { id, title: taskForm.title, assignedDate: taskForm.date, pipe: taskForm.pipe, priority: taskForm.priority, status: 'Pending' },
-                  ...prev,
-                ])
-                setTaskForm((f) => ({ ...f, title: 'Maintenance Task' }))
-              }}
-            >
-              <label className="grid gap-1">
-                <span className="text-xs font-semibold text-slate-600">Task title</span>
-                <input
-                  value={taskForm.title}
-                  onChange={(e) => setTaskForm((f) => ({ ...f, title: e.target.value }))}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-300"
-                />
-              </label>
-              <label className="grid gap-1">
-                <span className="text-xs font-semibold text-slate-600">Assigned date</span>
-                <input
-                  type="date"
-                  value={taskForm.date}
-                  onChange={(e) => setTaskForm((f) => ({ ...f, date: e.target.value }))}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-300"
-                />
-              </label>
-              <label className="grid gap-1">
-                <span className="text-xs font-semibold text-slate-600">Asset / Location</span>
-                <select
-                  value={taskForm.pipe}
-                  onChange={(e) => setTaskForm((f) => ({ ...f, pipe: e.target.value }))}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-300"
-                >
-                  {pipeOptions.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="grid gap-1">
-                <span className="text-xs font-semibold text-slate-600">Priority</span>
-                <select
-                  value={taskForm.priority}
-                  onChange={(e) => setTaskForm((f) => ({ ...f, priority: e.target.value }))}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-300"
-                >
-                  {['High', 'Medium', 'Low'].map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button type="submit" className="mt-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">
-                Schedule
-              </button>
-            </form>
-          </div>
-
-          <div className="lg:col-span-2">
-            <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_10px_35px_rgba(15,23,42,0.06)]">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">Upcoming tasks</p>
-                  <p className="mt-1 text-2xl font-bold text-slate-900">Maintenance Timeline</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                    <CalendarDays size={14} />
-                    {filteredTasks.length} tasks
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                <label className="grid gap-1">
-                  <span className="text-xs font-semibold text-slate-600">Priority</span>
-                  <select
-                    value={filters.priority}
-                    onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value }))}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-300"
-                  >
-                    {['All', 'High', 'Medium', 'Low'].map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
+                    {['Inspect', 'Notify team'].map((action) => (
+                      <button key={action} onClick={() => logOperatorAction(alert, action)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700">{action}</button>
                     ))}
-                  </select>
-                </label>
-                <label className="grid gap-1">
-                  <span className="text-xs font-semibold text-slate-600">Asset / Location</span>
-                  <select
-                    value={filters.pipe}
-                    onChange={(e) => setFilters((f) => ({ ...f, pipe: e.target.value }))}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-300"
-                  >
-                    {['All', ...pipeOptions].map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="grid gap-1">
-                  <span className="text-xs font-semibold text-slate-600">Date</span>
-                  <input
-                    type="date"
-                    value={filters.date}
-                    onChange={(e) => setFilters((f) => ({ ...f, date: e.target.value }))}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-300"
-                  />
-                </label>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {filteredTasks.length === 0 ? (
-                  <div className="rounded-xl border border-slate-200 bg-white p-4 text-center text-sm font-semibold text-slate-600">
-                    No tasks match your filters.
                   </div>
-                ) : (
-                  filteredTasks.map((t) => {
-                    const tone = priorityTone(t.priority)
-                    return (
-                      <div key={t.id} className="rounded-2xl border border-slate-200 bg-white p-4 transition hover:shadow-[0_18px_45px_rgba(59,130,246,0.10)]">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${tone.badge}`}>
-                                <span className={`h-2.5 w-2.5 rounded-full ${tone.dot}`} />
-                                {t.priority}
-                              </span>
-                              <StatusPill status={t.status} />
-                            </div>
-                            <p className="mt-2 text-sm font-bold text-slate-900">{t.title}</p>
-                            <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-slate-600">
-                              <Factory size={14} />
-                              {t.pipe}
-                            </p>
-                            <p className="mt-1 flex items-center gap-2 text-sm font-semibold text-slate-600">
-                              <CalendarDays size={14} />
-                              {t.assignedDate}
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            {t.status !== 'Completed' ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setScheduledTasks((prev) =>
-                                    prev.map((x) => (x.id === t.id ? { ...x, status: x.status === 'Pending' ? 'In Progress' : 'Completed' } : x)),
-                                  )
-                                }
-                                className="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-indigo-700"
-                              >
-                                {t.status === 'Pending' ? 'Start' : 'Complete'}
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                              onClick={() => setScheduledTasks((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: 'Pending' } : x)))}
-                                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-                              >
-                                Reopen
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setScheduledTasks((prev) => prev.filter((x) => x.id !== t.id))}
-                              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 5) SMART INSIGHT PANEL */}
-      <div className="mt-8">
-        <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_10px_35px_rgba(15,23,42,0.06)]">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-slate-500">Backend Recommendation Summary</p>
-              <h3 className="mt-2 text-2xl font-bold text-slate-900">What to do next</h3>
-            </div>
-            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-              <SlidersHorizontal size={14} />
-              Strategy
-            </span>
-          </div>
-
-          <p className="mt-3 text-sm font-semibold text-slate-700 leading-relaxed">
-            {recommendations[0]?.reason || (
-              latest && status?.connected && !status?.stale
-                ? 'No anomaly-based recommendation is currently available from the latest Arduino measurements.'
-                : 'No live recommendation is available because valid current Arduino readings are missing or stale.'
-            )}
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-              <Power size={14} />
-              Source: {status?.source === 'demo' ? 'DEMO SIMULATION' : status?.source === 'arduino' ? 'Arduino serial' : 'Unavailable'}
-            </span>
-            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-              <Wrench size={14} />
-              {status?.connected && !status?.stale ? 'Serial connected' : 'Serial offline or stale'}
-            </span>
-            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-              <AlertTriangle size={14} />
-              Last reading: {formatBackendTime(latest?.timestamp) || 'not available'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* 6) NAV LINK */}
-      <div className="mt-10 flex items-center justify-center">
-        <Link to="/predict" className="text-sm font-bold text-indigo-700 transition hover:underline">
-          View Anomaly Analysis →
-        </Link>
-      </div>
-
-      <ConfirmModal
-        open={confirm.open}
-        title="Confirm Immediate Action"
-        message={
-          confirm.alert && confirm.action
-            ? `Are you sure you want to execute “${confirm.action}” for “${confirm.alert.message || confirm.alert.title || 'Alert'}”?`
-            : 'Are you sure you want to proceed?'
-        }
-        confirmText="Execute Action"
-        cancelText="Cancel"
-        onClose={closeConfirm}
-        onConfirm={executeImmediateAction}
-      />
-
-      {/* Small recent action strip (demo) */}
-      <div className="fixed bottom-4 right-4 z-50 hidden w-80 max-w-full rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-[0_18px_45px_rgba(15,23,42,0.15)] lg:block">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-bold text-slate-900">Action Log</p>
-          <span className="text-xs font-semibold text-slate-500">{recentActions.length}/6</span>
-        </div>
-        <div className="mt-3 space-y-2">
-          {recentActions.length === 0 ? (
-            <p className="text-sm font-semibold text-slate-600">No actions executed yet.</p>
+                </li>
+              ))}
+            </ul>
           ) : (
-            recentActions.map((a) => (
-              <div key={a.id} className="rounded-xl border border-slate-200 bg-white p-2">
-                <p className="text-xs font-bold text-slate-900">{a.action}</p>
-                <p className="mt-1 text-xs font-semibold text-slate-600">{a.alertTitle}</p>
-                <p className="mt-1 text-[11px] font-semibold text-slate-500">{a.time}</p>
-              </div>
-            ))
+            <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+              {liveUnavailable ? 'No current valid evidence; anomaly status cannot be evaluated.' : latest ? 'No backend anomaly is currently detected.' : 'Waiting for actual sensor measurements.'}
+            </p>
           )}
-        </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2">
+            <Wrench className="text-indigo-600" />
+            <h2 className="text-xl font-bold text-slate-900">Evidence-based recommendations</h2>
+          </div>
+          {recommendations.length ? (
+            <ul className="mt-4 space-y-3">
+              {recommendations.map((recommendation) => (
+                <li key={recommendation.issue} className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <h3 className="font-bold text-slate-900">{recommendation.issue}</h3>
+                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-800">{recommendation.priority}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-700">{recommendation.reason}</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Evidence: flow {evidenceText(recommendation.evidence?.flow, ' mL/s')} · pH {evidenceText(recommendation.evidence?.pH)} · pressure {evidenceText(recommendation.evidence?.pressure, recommendation.evidence?.pressure === null ? '' : ` ${latest?.pressureUnit || ''}`)} · wall thickness {evidenceText(recommendation.evidence?.thicknessMm, ' mm')}.
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">Reading time: {formatTime(recommendation.timestamp)} · Failure prediction: unavailable</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(recommendation.actions || []).map((action) => (
+                      <button key={action} onClick={() => logOperatorAction(recommendation, action)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700">{action}</button>
+                    ))}
+                    {recommendation.assetId ? <Link to={`/digital-twin?asset=${encodeURIComponent(recommendation.assetId)}`} className="inline-flex items-center gap-1 rounded-lg bg-indigo-700 px-3 py-1.5 text-sm font-semibold text-white">Open asset <ExternalLink size={14} /></Link> : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+              {liveUnavailable ? 'Recommendations are unavailable while readings are offline or stale.' : 'No anomaly-based recommendation is available from the current measurements.'}
+            </p>
+          )}
+        </section>
       </div>
+
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center gap-2">
+          <CalendarDays className="text-emerald-700" />
+          <h2 className="text-xl font-bold text-slate-900">Maintenance schedule</h2>
+          <span className="ml-auto text-sm text-slate-600">{taskCount} open</span>
+        </div>
+        <form onSubmit={createTask} className="mt-4 grid gap-3 md:grid-cols-5">
+          <label className="text-sm font-semibold text-slate-700 md:col-span-2">Task
+            <input required maxLength={160} value={task.title} onChange={(event) => setTask({ ...task, title: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal" />
+          </label>
+          <label className="text-sm font-semibold text-slate-700">Due date
+            <input type="date" required value={task.assignedDate} onChange={(event) => setTask({ ...task, assignedDate: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal" />
+          </label>
+          <label className="text-sm font-semibold text-slate-700">Asset
+            <select value={task.assetId} onChange={(event) => setTask({ ...task, assetId: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal">
+              <option value="">Unassigned</option>
+              {assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.name} ({asset.id})</option>)}
+            </select>
+          </label>
+          <label className="text-sm font-semibold text-slate-700">Priority
+            <select value={task.priority} onChange={(event) => setTask({ ...task, priority: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal">
+              {['High', 'Medium', 'Low'].map((priority) => <option key={priority}>{priority}</option>)}
+            </select>
+          </label>
+          <button disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 font-bold text-white disabled:opacity-50 md:col-span-5"><Plus size={16} /> Add task</button>
+        </form>
+        {loading ? <p className="mt-5 text-sm text-slate-500">Loading saved maintenance tasks…</p> : tasks.length ? (
+          <ul className="mt-5 divide-y divide-slate-200">
+            {tasks.map((item) => (
+              <li key={item.id} className="flex flex-wrap items-center gap-3 py-3">
+                <div className="min-w-48 flex-1">
+                  <p className="font-semibold text-slate-900">{item.title}</p>
+                  <p className="text-sm text-slate-600">{item.assetId ? <Link className="text-indigo-700 underline" to={`/digital-twin?asset=${encodeURIComponent(item.assetId)}`}>{assets.find((asset) => asset.id === item.assetId)?.name || item.assetId}</Link> : 'Unassigned'} · {item.priority} priority · Due {item.assignedDate}</p>
+                  <p className="text-xs text-slate-500">Updated {formatTime(item.updatedAt)}</p>
+                </div>
+                <label className="text-sm font-semibold text-slate-600">Status
+                  <select value={item.status} disabled={saving} onChange={(event) => updateTaskStatus(item, event.target.value)} className="ml-2 rounded-lg border border-slate-300 px-2 py-1">
+                    {['Pending', 'In Progress', 'Completed'].map((value) => <option key={value}>{value}</option>)}
+                  </select>
+                </label>
+                <button type="button" aria-label="Delete maintenance task" disabled={saving} onClick={() => deleteTask(item.id)} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50"><Trash2 size={17} /></button>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">No maintenance tasks are saved yet.</p>}
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center gap-2"><Clock size={18} className="text-slate-600" /><h2 className="font-bold text-slate-900">Operator action log</h2></div>
+        <p className="mt-1 text-xs text-slate-500">Actions here are local notes only; HydroNexus does not control pumps or valves.</p>
+        {actionLog.length ? (
+          <ul className="mt-3 space-y-2">{actionLog.map((entry) => <li key={entry.id} className="text-sm text-slate-700">{formatTime(entry.timestamp)} · {entry.action} · {entry.title}</li>)}</ul>
+        ) : <p className="mt-3 text-sm text-slate-500">No operator actions logged this session.</p>}
+      </section>
     </section>
   )
 }

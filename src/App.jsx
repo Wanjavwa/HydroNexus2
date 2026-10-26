@@ -1,185 +1,71 @@
-import { Activity, AlertTriangle, BarChart3, Gauge, SlidersHorizontal, Shield, TestTube2, TrendingUp, Wrench } from 'lucide-react'
-import { BrowserRouter, Link, Route, Routes, useNavigate } from 'react-router-dom'
+import { createElement, lazy, Suspense } from 'react'
+import { Activity, Bot, Network, Wrench } from 'lucide-react'
+import { BrowserRouter, NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import AssistantWidget from './components/AssistantWidget.jsx'
 import MonitorPage from './pages/MonitorPage.jsx'
-import PredictPage from './pages/PredictPage.jsx'
 import PreventPage from './pages/PreventPage.jsx'
 import { SensorDataProvider } from './context/SensorDataContext.jsx'
-import whatWeDoVideo from './assets/what-we-do.mp4'
+import { WorkspaceProvider } from './context/WorkspaceContext.jsx'
 
-const cls = {
-  page: 'mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8',
-  card: 'rounded-2xl border border-slate-200/70 bg-white/90 p-6 shadow-[0_10px_35px_rgba(15,23,42,0.07)] backdrop-blur-sm transition hover:-translate-y-0.5 hover:shadow-[0_18px_40px_rgba(59,130,246,0.12)]',
-}
+const DigitalTwinPage = lazy(() => import('./pages/DigitalTwinPage.jsx'))
 
-function scrollToId(id) {
-  const element = document.getElementById(id)
-  if (element) element.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
+const navItems = [
+  { to: '/monitor-predict', label: 'Monitor & Predict', icon: Activity },
+  { to: '/digital-twin', label: 'Digital Twin', icon: Network },
+  { to: '/maintenance', label: 'Maintenance', icon: Wrench },
+]
 
-function NavBar() {
-  const navigate = useNavigate()
-
+function Navigation() {
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200/70 bg-white/90 backdrop-blur">
-      <div className={`${cls.page} flex h-16 items-center justify-between`}>
-        <Link to="/" className="flex items-center gap-2 text-xl font-bold text-slate-800">
-          <span className="rounded-md bg-gradient-to-r from-indigo-600 to-sky-500 p-1.5 text-white">
-            <Gauge size={16} />
-          </span>
+    <header className="sticky top-0 z-50 border-b border-slate-200/70 bg-white/95 backdrop-blur">
+      <div className="mx-auto flex min-h-16 w-full max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-6 lg:px-8">
+        <NavLink to="/monitor-predict" className="flex items-center gap-2 text-xl font-bold text-slate-900">
+          <span className="rounded-lg bg-gradient-to-r from-indigo-600 to-sky-500 p-2 text-white"><Activity size={17} /></span>
           HydroNexus
-        </Link>
-        <nav className="hidden items-center gap-2 md:flex">
-          <button className="nav-btn" onClick={() => navigate('/')}>Home</button>
-          <button className="nav-btn" onClick={() => navigate('/monitor')}>Monitor</button>
-          <button className="nav-btn" onClick={() => navigate('/predict')}>Predict</button>
-          <button className="nav-btn" onClick={() => navigate('/prevent')}>Prevent</button>
+        </NavLink>
+        <nav aria-label="Main navigation" className="flex flex-wrap items-center gap-1">
+          {navItems.map(({ to, label, icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) => `inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${isActive ? 'bg-indigo-50 text-indigo-800' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
+            >
+              {createElement(icon, { size: 16 })}
+              {label}
+            </NavLink>
+          ))}
+          <span className="ml-2 hidden items-center gap-1 text-xs font-semibold text-slate-500 sm:inline-flex"><Bot size={14} /> Assistant</span>
         </nav>
       </div>
     </header>
   )
 }
 
-function HomePage() {
-  return (
-    <div className="pb-20">
-      <section className="relative overflow-hidden border-b border-slate-100">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_15%,rgba(99,102,241,0.2),transparent_45%),radial-gradient(circle_at_82%_20%,rgba(14,165,233,0.22),transparent_40%)]" />
-        <div className={`${cls.page} relative py-20 text-center sm:py-24`}>
-          <p className="mx-auto mb-6 inline-flex items-center rounded-full bg-indigo-50 px-5 py-1.5 text-base font-semibold text-indigo-700">
-            Intelligent Pipeline Platform
-          </p>
-          <h1 className="text-7xl font-black tracking-tight text-slate-900 sm:text-8xl">HYDRONEXUS</h1>
-          <p className="mx-auto mt-6 max-w-3xl text-xl leading-relaxed text-slate-600 sm:text-2xl">
-            All-in-one water management system to monitor pipelines, detect anomalies,
-            and protect campus infrastructure in real time.
-          </p>
-          <div className="mt-10 flex justify-center gap-4">
-            <Link to="/prevent" className="rounded-xl bg-gradient-to-r from-indigo-600 to-sky-500 px-8 py-3.5 text-lg font-semibold text-white shadow-lg shadow-sky-200 transition hover:opacity-90">
-              Prevent Center
-            </Link>
-            <button
-              type="button"
-              onClick={() => scrollToId('monitor')}
-              className="rounded-xl border border-slate-300 bg-white px-8 py-3.5 text-lg font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700"
-            >
-              Learn More
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className={`${cls.page} py-16`}>
-        <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-8 shadow-[0_10px_35px_rgba(15,23,42,0.07)]">
-          <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
-            <div className="reveal-animate" style={{ '--reveal-shift': '-18px' }}>
-              <h2 className="text-4xl font-bold text-slate-900">What We Do</h2>
-              <p className="mt-4 max-w-xl text-lg leading-relaxed text-slate-600">
-              HydroNexus is an intelligent water management system that 
-              combines smart devices such as sensors, pumps, and switches with an 
-              interactive web platform—all working together to monitor real-time conditions,
-               analyze system behavior, detect unusual readings, and enable proactive action
-               to improve the reliability of Grambling’s water infrastructure across campus.
-              </p>
-            </div>
-
-            <div className="reveal-animate" style={{ '--reveal-shift': '18px' }}>
-              <div className="overflow-hidden rounded-2xl bg-slate-100 shadow-sm">
-                <video
-                  src={whatWeDoVideo}
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                  className="aspect-video w-full object-cover"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="monitor" className={`${cls.page} scroll-mt-24 py-16`}>
-        <div className="mb-8">
-          <h2 className="text-4xl font-bold text-slate-900">01 Monitor</h2>
-          <p className="mt-3 max-w-3xl text-lg text-slate-600">
-            Continuously monitor pipeline conditions through integrated sensing for complete real-time awareness.
-          </p>
-        </div>
-        <div className="grid gap-5 md:grid-cols-3">
-          <div className={cls.card}><Activity className="mb-3 text-sky-500" /><h3 className="text-2xl font-semibold text-slate-900">Flow & Pressure</h3><p className="mt-2 text-slate-600">Detect unusual flow or pressure changes when those sensors report valid readings.</p></div>
-          <div className={cls.card}><TestTube2 className="mb-3 text-cyan-500" /><h3 className="text-2xl font-semibold text-slate-900">Water Quality</h3><p className="mt-2 text-slate-600">Measure pH, detect hard water, contamination, and corrosion factors.</p></div>
-          <div className={cls.card}><Shield className="mb-3 text-indigo-500" /><h3 className="text-2xl font-semibold text-slate-900">Additional Sensors</h3><p className="mt-2 text-slate-600">Optional sensor values appear only when the connected hardware reports them.</p></div>
-        </div>
-      </section>
-
-      <section id="predict" className={`${cls.page} scroll-mt-24 py-16`}>
-        <div className="mb-8">
-          <h2 className="text-4xl font-bold text-slate-900">02 Analyze</h2>
-          <p className="mt-3 max-w-3xl text-lg text-slate-600">
-            Review actual sensor history and detect abnormal flow and water-quality readings. The available data does not support future-failure prediction.
-          </p>
-        </div>
-        <div className="grid gap-5 md:grid-cols-3">
-          <div className={cls.card}>
-            <Activity className="mb-3 text-cyan-500" />
-            <h3 className="text-2xl font-semibold text-slate-900">Available Measurements</h3>
-            <p className="mt-2 text-slate-600">Review flow, pH, and pressure only when a valid reading is reported.</p>
-          </div>
-          <div className={cls.card}>
-            <TrendingUp className="mb-3 text-cyan-500" />
-            <h3 className="text-2xl font-semibold text-slate-900">Measured Trends</h3>
-            <p className="mt-2 text-slate-600">Compare actual sensor measurements across the available history.</p>
-          </div>
-          <div className={cls.card}>
-            <BarChart3 className="mb-3 text-cyan-500" />
-            <h3 className="text-2xl font-semibold text-slate-900">Anomaly Detection</h3>
-            <p className="mt-2 text-slate-600">Flag unusual changes in valid flow, pH, and pressure readings.</p>
-          </div>
-        </div>
-      </section>
-
-      <section id="prevent" className={`${cls.page} scroll-mt-24 py-16`}>
-        <div className="mb-8">
-          <h2 className="text-4xl font-bold text-slate-900">03 Prevent</h2>
-          <p className="mt-3 max-w-3xl text-lg text-slate-600">
-            Respond to detected anomalies, review backend recommendations, and manage maintenance tasks.
-          </p>
-        </div>
-        <div className="grid gap-5 md:grid-cols-3">
-          <div className={cls.card}>
-            <AlertTriangle className="mb-3 text-rose-500" />
-            <h3 className="text-2xl font-semibold text-slate-900">🚨 Immediate Response</h3>
-            <p className="mt-2 text-slate-600">Active critical alerts with action buttons and confirmation before executing shutdowns.</p>
-          </div>
-          <div className={cls.card}>
-            <SlidersHorizontal className="mb-3 text-amber-500" />
-            <h3 className="text-2xl font-semibold text-slate-900">🧠 Recommended Actions</h3>
-            <p className="mt-2 text-slate-600">Top preventive workflows prioritized by urgency to stop degradation from escalating.</p>
-          </div>
-          <div className={cls.card}>
-            <Wrench className="mb-3 text-emerald-600" />
-            <h3 className="text-2xl font-semibold text-slate-900">🛠️ Maintenance Management</h3>
-            <p className="mt-2 text-slate-600">Schedule, filter, and track maintenance tasks with clear status updates.</p>
-          </div>
-        </div>
-      </section>
-    </div>
-  )
-}
-
-function ShellLayout() {
+function AppShell() {
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#f8fafc_0%,#f7f7ff_45%,#f0f9ff_100%)]">
-      <NavBar />
+      <Navigation />
       <main>
         <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/monitor" element={<MonitorPage />} />
-          <Route path="/predict" element={<PredictPage />} />
-          <Route path="/analyze" element={<PredictPage />} />
-          <Route path="/prevent" element={<PreventPage />} />
+          <Route path="/" element={<Navigate to="/monitor-predict" replace />} />
+          <Route path="/monitor-predict" element={<MonitorPage />} />
+          <Route
+            path="/digital-twin"
+            element={(
+              <Suspense fallback={<p className="mx-auto max-w-7xl px-4 py-10 text-slate-600">Loading digital twin…</p>}>
+                <DigitalTwinPage />
+              </Suspense>
+            )}
+          />
+          <Route path="/maintenance" element={<PreventPage />} />
+          <Route path="/monitor" element={<Navigate to="/monitor-predict" replace />} />
+          <Route path="/predict" element={<Navigate to="/monitor-predict" replace />} />
+          <Route path="/analyze" element={<Navigate to="/monitor-predict" replace />} />
+          <Route path="/prevent" element={<Navigate to="/maintenance" replace />} />
+          <Route path="*" element={<Navigate to="/monitor-predict" replace />} />
         </Routes>
       </main>
+      <AssistantWidget />
     </div>
   )
 }
@@ -188,7 +74,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <SensorDataProvider>
-        <ShellLayout />
+        <WorkspaceProvider>
+          <AppShell />
+        </WorkspaceProvider>
       </SensorDataProvider>
     </BrowserRouter>
   )

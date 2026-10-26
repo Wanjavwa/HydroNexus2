@@ -26,7 +26,7 @@ function StatusNotice({ status, connectionLost, error }) {
   )
 }
 
-export default function PredictPage() {
+export default function PredictPage({ embedded = false }) {
   const { latest, history, alerts, recommendations, status, connectionLost, error, loading } = useSensorData()
   const flowHistory = history
     .filter((reading) => Number.isFinite(reading.flow))
@@ -34,17 +34,21 @@ export default function PredictPage() {
   const phHistory = history
     .filter((reading) => Number.isFinite(reading.pH))
     .map((reading) => ({ time: new Date(reading.timestamp).toLocaleTimeString(), pH: reading.pH }))
+  const thicknessHistory = history
+    .filter((reading) => Number.isFinite(reading.thicknessMm))
+    .map((reading) => ({ time: new Date(reading.timestamp).toLocaleTimeString(), thicknessMm: reading.thicknessMm }))
   const missingSensors = [
     ['Flow', latest?.flow],
     ['pH', latest?.pH],
     ['Pressure', latest?.pressure],
+    ['Thickness', latest?.thicknessMm],
   ].filter(([, value]) => !Number.isFinite(value)).map(([name]) => name)
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
+    <section className={embedded ? 'mx-auto mt-2 w-full max-w-6xl border-t border-slate-200 px-4 py-10 sm:px-6 lg:px-8' : 'mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8'}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-4xl font-bold text-slate-900">Analyze Readings</h1>
+          <h1 className="text-3xl font-bold text-slate-900">{embedded ? 'Anomaly Analysis' : 'Monitor & Predict'}</h1>
           <p className="mt-2 max-w-3xl text-slate-600">
             Backend anomaly detection from actual Arduino measurements and available valid history. This view does not predict future failures.
           </p>
@@ -102,6 +106,7 @@ export default function PredictPage() {
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
         <LiveLineChart title="Flow history" subtitle="Actual valid flow readings; no generated points" data={flowHistory} dataKey="flow" stroke="#0ea5e9" />
         <LiveLineChart title="pH history" subtitle="Actual valid pH readings; no generated points" data={phHistory} dataKey="pH" stroke="#14b8a6" />
+        <LiveLineChart title="Wall thickness history" subtitle="Only reported ultrasonic measurements; no inferred wall loss" data={thicknessHistory} dataKey="thicknessMm" stroke="#f59e0b" />
       </div>
 
       <div className="mt-6 rounded-2xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_10px_35px_rgba(15,23,42,0.07)]">
@@ -110,12 +115,16 @@ export default function PredictPage() {
           <h2 className="text-xl font-bold text-slate-900">Latest backend reading</h2>
         </div>
         {latest ? (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <div className="rounded-xl border border-slate-200 p-3"><p className="text-xs text-slate-500">Flow</p><p className="font-bold">{valueOrMissing(latest.flow)} {Number.isFinite(latest.flow) ? 'mL/s' : ''}</p></div>
             <div className="rounded-xl border border-slate-200 p-3"><p className="text-xs text-slate-500">pH</p><p className="font-bold">{valueOrMissing(latest.pH)}</p></div>
             <div className="rounded-xl border border-slate-200 p-3"><p className="text-xs text-slate-500">Pressure</p><p className="font-bold">{valueOrMissing(latest.pressure)} {Number.isFinite(latest.pressure) ? latest.pressureUnit || '' : ''}</p></div>
+            <div className="rounded-xl border border-slate-200 p-3"><p className="text-xs text-slate-500">Wall thickness</p><p className="font-bold">{valueOrMissing(latest.thicknessMm)} {Number.isFinite(latest.thicknessMm) ? 'mm' : ''}</p></div>
             <div className="rounded-xl border border-slate-200 p-3"><p className="text-xs text-slate-500">Asset / sensor</p><p className="break-words font-bold">{latest.assetId || 'Not reported'} / {latest.sensorId || 'Not reported'}</p></div>
           </div>
+          {Number.isFinite(latest.thicknessMm) ? <p className="mt-3 text-sm text-amber-800">A thickness value alone does not establish wall loss; no baseline or material model is configured.</p> : null}
+          </>
         ) : (
           <p className="mt-4 text-sm text-slate-600">No valid readings have been received from the backend.</p>
         )}

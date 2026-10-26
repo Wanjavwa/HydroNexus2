@@ -1,9 +1,9 @@
-import { Activity, AlertTriangle, Droplets, Gauge } from 'lucide-react'
+import { Activity, AlertTriangle, Droplets, Gauge, Ruler } from 'lucide-react'
 import { AlertsPanel } from '../components/AlertsPanel.jsx'
 import { LiveLineChart } from '../components/LiveLineChart.jsx'
 import { MetricCard } from '../components/MetricCard.jsx'
-import PipelineMap from '../components/PipelineMap.jsx'
 import { useSensorData } from '../hooks/useSensorData.js'
+import PredictPage from './PredictPage.jsx'
 
 const page = 'mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8'
 
@@ -64,6 +64,7 @@ export default function MonitorPage() {
     flow: Number.isFinite(reading.flow) ? reading.flow : null,
     pH: Number.isFinite(reading.pH) ? reading.pH : null,
     pressure: Number.isFinite(reading.pressure) ? reading.pressure : null,
+    thicknessMm: Number.isFinite(reading.thicknessMm) ? reading.thicknessMm : null,
   }))
   const sourceLabel = status?.source === 'demo'
     ? 'DEMO SIMULATION'
@@ -78,10 +79,11 @@ export default function MonitorPage() {
   const pressureUnit = latest?.pressureUnit ? ` ${latest.pressureUnit}` : ''
 
   return (
+    <>
     <section className={`${page} py-12`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-4xl font-bold text-slate-900">Monitor</h1>
+          <h1 className="text-4xl font-bold text-slate-900">Monitor & Predict</h1>
           <p className="mt-2 max-w-3xl text-slate-600">
             Measurements received from the connected Arduino and polled from the backend every second.
           </p>
@@ -103,7 +105,7 @@ export default function MonitorPage() {
         </div>
       ) : (
         <>
-          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <SensorCard
               title="Flow Rate"
               icon={Droplets}
@@ -135,7 +137,18 @@ export default function MonitorPage() {
               statusText={Number.isFinite(latest.pressure) ? 'Arduino-reported measurement' : 'Pressure sensor reading unavailable'}
               statusTone={isStale ? 'warning' : 'normal'}
             />
+            <SensorCard
+              title="Wall Thickness"
+              icon={Ruler}
+              value={Number.isFinite(latest.thicknessMm) ? latest.thicknessMm.toFixed(2) : 'Missing'}
+              unit={Number.isFinite(latest.thicknessMm) ? 'mm' : ''}
+              statusText={Number.isFinite(latest.thicknessMm) ? 'Reported ultrasonic measurement' : 'Thickness reading unavailable'}
+              statusTone={isStale ? 'warning' : 'normal'}
+            />
           </div>
+          {Number.isFinite(latest.thicknessMm) ? (
+            <p className="mt-3 text-sm text-amber-800">Thickness is the reported measurement only. A baseline, material, calibration, and inspection context are required to assess wall loss.</p>
+          ) : null}
 
           {isStale ? (
             <p className="mt-3 text-sm font-semibold text-amber-700">
@@ -146,9 +159,10 @@ export default function MonitorPage() {
           <div className="mt-6 grid gap-4 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <div className="grid gap-4 md:grid-cols-2">
-                <LiveLineChart title="Flow history" subtitle="Actual Arduino readings only" data={chartData} dataKey="flow" stroke="#0ea5e9" />
-                <LiveLineChart title="pH history" subtitle="Actual Arduino readings only" data={chartData} dataKey="pH" stroke="#14b8a6" />
+                <LiveLineChart title="Flow history" subtitle="Backend readings only" data={chartData} dataKey="flow" stroke="#0ea5e9" />
+                <LiveLineChart title="pH history" subtitle="Backend readings only" data={chartData} dataKey="pH" stroke="#14b8a6" />
                 <LiveLineChart title="Pressure history" subtitle="Only present when reported by the Arduino" data={chartData} dataKey="pressure" stroke="#6366f1" />
+                <LiveLineChart title="Wall thickness history" subtitle="Only present when reported by an ultrasonic sensor" data={chartData} dataKey="thicknessMm" stroke="#f59e0b" />
               </div>
             </div>
             <div className="space-y-4">
@@ -167,11 +181,10 @@ export default function MonitorPage() {
             </div>
           </div>
 
-          <div className="mt-8">
-            <PipelineMap latest={latest} status={status} />
-          </div>
         </>
       )}
     </section>
+    <PredictPage embedded />
+    </>
   )
 }

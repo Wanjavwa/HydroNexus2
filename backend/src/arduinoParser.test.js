@@ -42,11 +42,25 @@ test('preserves optional JSON pressure, timestamp, and identifiers', () => {
     total: null,
     pH: 7.2,
     pressure: 42.5,
+    thicknessMm: null,
     timestamp: now,
     assetId: 'main-supply',
     sensorIds: { flow: 'flow-1', pH: 'ph-1', pressure: 'pressure-1' },
     pressureUnit: 'kPa',
   })
+})
+
+test('accepts ultrasonic thickness as a standalone sensor reading', () => {
+  const parser = createArduinoParser({
+    onReading: (reading) => store.pushReading(reading),
+    onMalformed: (message) => assert.fail(message),
+  })
+
+  parser.feed(Buffer.from('{"thicknessMm":8.75,"assetId":"main-pipe","sensorId":"ut-1"}\n'))
+
+  assert.equal(store.getLatest().thicknessMm, 8.75)
+  assert.equal(store.getLatest().assetId, 'main-pipe')
+  assert.equal(store.getLatest().sensorId, 'ut-1')
 })
 
 test('retains an available partial text reading when another sensor is absent', () => {
